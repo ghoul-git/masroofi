@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Expenses | Masroofi{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<div class="card">
+    <div class="actions" style="justify-content: space-between; align-items: center;">
+        <h1 style="margin: 0;">Your expenses</h1>
+        <a class="button" href="{% url 'upload' %}">Upload a receipt</a>
+    </div>
+
+    <ul class="errors" id="page-errors" hidden></ul>
+    <p id="loading" class="muted"><span class="spinner"></span>Loading expenses...</p>
+    <p id="empty" class="muted" hidden>
+        No expenses yet. <a href="{% url 'upload' %}">Upload your first receipt</a>.
+    </p>
+
+    <div class="table-wrap" id="table-wrap" hidden>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Store</th>
+                    <th>Category</th>
+                    <th class="number">Items</th>
+                    <th class="number">Total</th>
+                    <th>Currency</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="expenses-body"></tbody>
+        </table>
+    </div>
+</div>
+
+{{ categories|json_script:"categories-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'expenses/js/api.js' %}"></script>
+<script src="{% static 'expenses/js/expenses.js' %}"></script>
+{% endblock %}

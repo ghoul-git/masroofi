@@ -5,6 +5,10 @@
 {% block content %}
 <div class="card">
     <h1>Welcome, {{ user.username }}</h1>
-    <p>Your expenses will appear here.</p>
+    <p>Upload a receipt photo to record an expense, or review the expenses you have saved.</p>
+    <div class="actions">
+        <a class="button" href="{% url 'upload' %}">Upload a receipt</a>
+        <a class="button button-secondary" href="{% url 'expenses' %}">View expenses</a>
+    </div>
 </div>
 {% endblock %}

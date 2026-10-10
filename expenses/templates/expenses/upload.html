@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Upload receipt | Masroofi{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<div class="card">
+    <h1>Upload a receipt</h1>
+
+    <form id="upload-form">
+        <label for="receipt-image">Receipt photo</label>
+        <input type="file" id="receipt-image" name="image" accept="image/*" required>
+        <ul class="errors" id="upload-errors" hidden></ul>
+        <button type="submit" class="button" id="upload-button">Read receipt</button>
+    </form>
+
+    <p id="loading" class="muted" hidden>
+        <span class="spinner"></span>Reading your receipt. This can take up to a minute.
+    </p>
+</div>
+
+<form id="review-form" class="card" style="margin-top: 1.5rem;" hidden novalidate>
+    <h2>Review and save</h2>
+    <p id="failed-notice" class="notice" hidden>
+        We couldn't read this receipt automatically. Please fill in the fields yourself.
+    </p>
+
+    <div class="grid">
+        <div>
+            <label for="store-name">Store</label>
+            <input type="text" id="store-name" maxlength="200" required>
+        </div>
+        <div>
+            <label for="date">Date</label>
+            <input type="date" id="date" required>
+        </div>
+        <div>
+            <label for="total">Total</label>
+            <input type="number" id="total" min="0" step="0.01" required>
+        </div>
+        <div>
+            <label for="currency">Currency</label>
+            <input type="text" id="currency" maxlength="3" required>
+        </div>
+        <div>
+            <label for="category">Category</label>
+            <select id="category" required></select>
+        </div>
+    </div>
+
+    <h3>Items</h3>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th class="number">Quantity</th>
+                    <th class="number">Price</th>
+                    <th><span class="muted" style="text-transform: none;">Remove</span></th>
+                </tr>
+            </thead>
+            <tbody id="items-body"></tbody>
+        </table>
+    </div>
+    <p id="no-items" class="muted">No items. Add them if you want a breakdown.</p>
+    <button type="button" class="button button-secondary button-small" id="add-item">Add item</button>
+
+    <details style="margin-top: 1rem;">
+        <summary class="muted">Text read from the receipt</summary>
+        <pre id="raw-text" style="white-space: pre-wrap;"></pre>
+    </details>
+
+    <ul class="errors" id="review-errors" hidden></ul>
+    <div class="actions" style="margin-top: 1rem;">
+        <button type="submit" class="button" id="save-button">Save</button>
+        <button type="button" class="button button-secondary" id="start-over">Start over</button>
+    </div>
+</form>
+
+<div id="saved" class="card" style="margin-top: 1.5rem;" hidden>
+    <p class="notice success">Expense saved.</p>
+    <div class="actions">
+        <a class="button" href="{% url 'expenses' %}">View expenses</a>
+        <a class="button button-secondary" href="{% url 'upload' %}">Upload another</a>
+    </div>
+</div>
+
+{{ categories|json_script:"categories-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'expenses/js/api.js' %}"></script>
+<script src="{% static 'expenses/js/upload.js' %}"></script>
+{% endblock %}
