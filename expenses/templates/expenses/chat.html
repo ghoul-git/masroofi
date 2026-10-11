@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Ask Masroofi | Masroofi{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<style>
+    .chat-log {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        min-height: 12rem;
+        max-height: 60vh;
+        overflow-y: auto;
+        padding: 0.25rem 0.25rem 1rem;
+    }
+    .message { max-width: 80%; }
+    .message.user { align-self: flex-end; }
+    .message.assistant { align-self: flex-start; }
+    .bubble {
+        padding: 0.6rem 0.9rem;
+        border-radius: 12px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+    .message.user .bubble { background: #0f766e; color: #ffffff; border-bottom-right-radius: 4px; }
+    .message.assistant .bubble { background: #f0f2f4; border-bottom-left-radius: 4px; }
+    .message .meta { font-size: 0.8rem; color: #52606d; margin-top: 0.25rem; }
+    .message.user .meta { text-align: right; }
+    .chat-form { display: flex; gap: 0.5rem; align-items: flex-end; margin-top: 1rem; }
+    .chat-form textarea {
+        flex: 1;
+        min-height: 2.6rem;
+        max-height: 10rem;
+        padding: 0.5rem;
+        border: 1px solid #cbd2d9;
+        border-radius: 4px;
+        font: inherit;
+        resize: vertical;
+    }
+</style>
+
+<div class="card">
+    <h1 style="margin-top: 0;">Ask Masroofi</h1>
+    <p class="muted" style="margin-top: 0;">Ask about your spending, in Arabic or English. For example: "How much did I spend on food this month?"</p>
+
+    <div id="chat-log" class="chat-log" aria-live="polite">
+        <p id="history-loading" class="muted"><span class="spinner"></span>Loading conversation...</p>
+        <p id="empty" class="muted" hidden>No messages yet. Ask your first question below.</p>
+    </div>
+
+    <p id="thinking" class="muted" hidden><span class="spinner"></span>Masroofi is thinking...</p>
+    <ul class="errors" id="chat-errors" hidden></ul>
+
+    <form id="chat-form" class="chat-form">
+        <textarea id="question" rows="1" maxlength="1000" dir="auto" placeholder="Ask about your expenses" required></textarea>
+        <button type="submit" class="button" id="send-button">Send</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'expenses/js/api.js' %}"></script>
+<script src="{% static 'expenses/js/chat.js' %}"></script>
+{% endblock %}

@@ -5,10 +5,11 @@
 {% block content %}
 <div class="card">
     <h1>Welcome, {{ user.username }}</h1>
-    <p>Upload a receipt photo to record an expense, or review the expenses you have saved.</p>
+    <p>Upload a receipt photo to record an expense, review the expenses you have saved, or ask Masroofi about your spending.</p>
     <div class="actions">
         <a class="button" href="{% url 'upload' %}">Upload a receipt</a>
         <a class="button button-secondary" href="{% url 'expenses' %}">View expenses</a>
+        <a class="button button-secondary" href="{% url 'chat' %}">Ask Masroofi</a>
     </div>
 </div>
 {% endblock %}

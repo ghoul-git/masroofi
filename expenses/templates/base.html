@@ -149,6 +149,7 @@
                 <a href="{% url 'home' %}">Home</a>
                 <a href="{% url 'upload' %}">Upload</a>
                 <a href="{% url 'expenses' %}">Expenses</a>
+                <a href="{% url 'chat' %}">Ask Masroofi</a>
                 <form method="post" action="{% url 'logout' %}">
                     {% csrf_token %}
                     <button type="submit" class="link-button">Log out</button>

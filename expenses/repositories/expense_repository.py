@@ -1,3 +1,5 @@
+from django.db.models import Count, Sum
+
 from expenses.models import Expense, Item
 
 
@@ -44,3 +46,56 @@ def update(user, expense_id, fields: dict, items: list[dict] | None = None) -> E
 def delete(user, expense_id) -> int:
     deleted, _ = Expense.objects.filter(user=user, pk=expense_id).delete()
     return deleted
+
+
+# Reporting queries for the chat tools. Totals are grouped by currency because
+# amounts in different currencies cannot be added together.
+
+
+def _in_period(user, start_date, end_date, category=None, store=None):
+    expenses = Expense.objects.filter(user=user, date__range=(start_date, end_date))
+    if category:
+        expenses = expenses.filter(category__name__iexact=category)
+    if store:
+        expenses = expenses.filter(store_name__icontains=store)
+    return expenses
+
+
+def totals_by_currency(user, start_date, end_date, category=None) -> list[dict]:
+    """[{"currency", "total", "count"}] for the period, largest total first."""
+    return list(
+        _in_period(user, start_date, end_date, category)
+        .values("currency")
+        .annotate(total=Sum("total"), count=Count("id"))
+        .order_by("-total", "currency")
+    )
+
+
+def totals_by_category(user, start_date, end_date) -> list[dict]:
+    """[{"category", "currency", "total", "count"}] for the period, largest total first."""
+    return list(
+        _in_period(user, start_date, end_date)
+        .values("category__name", "currency")
+        .annotate(total=Sum("total"), count=Count("id"))
+        .order_by("-total", "category__name")
+    )
+
+
+def list_in_period(user, start_date, end_date, category=None, store=None, limit=20) -> list[Expense]:
+    return list(
+        _in_period(user, start_date, end_date, category, store)
+        .select_related("category")
+        .order_by("-date", "-created_at")[:limit]
+    )
+
+
+def count_in_period(user, start_date, end_date, category=None, store=None) -> int:
+    return _in_period(user, start_date, end_date, category, store).count()
+
+
+def top_in_period(user, start_date, end_date, limit=5) -> list[Expense]:
+    return list(
+        _in_period(user, start_date, end_date)
+        .select_related("category")
+        .order_by("-total", "-date")[:limit]
+    )

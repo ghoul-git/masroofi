@@ -19,13 +19,14 @@ def make_receipt(user, status=Receipt.Status.EXTRACTED):
     return Receipt.objects.create(user=user, image="receipts/test.jpg", status=status)
 
 
-def make_expense(user, category, store_name="Carrefour", total="10.00"):
+def make_expense(user, category, store_name="Carrefour", total="10.00", date="2026-10-01", currency="JOD"):
     expense = Expense.objects.create(
         user=user,
         category=category,
         store_name=store_name,
-        date=datetime.date(2026, 10, 1),
+        date=datetime.date.fromisoformat(date),
         total=Decimal(total),
+        currency=currency,
     )
     Item.objects.create(expense=expense, name="Bread", quantity=1, price=Decimal("1.50"))
     return expense

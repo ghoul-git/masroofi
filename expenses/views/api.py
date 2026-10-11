@@ -5,12 +5,21 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
+from expenses.services.exceptions import ServiceUnavailable
+
+
+class ServiceUnavailableError(exceptions.APIException):
+    status_code = 503
+    default_detail = "The service is not available right now. Please try again."
+    default_code = "service_unavailable"
+
 
 class ServiceAPIView(APIView):
     """Base for the JSON API: session login required, service errors become HTTP errors.
 
-    Services raise Django's ValidationError and Model.DoesNotExist; this turns
-    them into 400 and 404 responses so the views stay thin.
+    Services raise Django's ValidationError, Model.DoesNotExist and
+    ServiceUnavailable; this turns them into 400, 404 and 503 responses so the
+    views stay thin.
     """
 
     authentication_classes = [SessionAuthentication]
@@ -22,4 +31,6 @@ class ServiceAPIView(APIView):
         elif isinstance(exc, DjangoValidationError):
             detail = exc.message_dict if hasattr(exc, "error_dict") else {"detail": exc.messages}
             exc = exceptions.ValidationError(detail)
+        elif isinstance(exc, ServiceUnavailable):
+            exc = ServiceUnavailableError(str(exc) or None)
         return super().handle_exception(exc)
