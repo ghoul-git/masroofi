@@ -11,7 +11,8 @@ def make_user(username="alice"):
 
 
 def make_category(name="food"):
-    return Category.objects.get_or_create(name=name)[0]
+    # The 0002 migration already creates "Food", "Transport", ... so match case-insensitively.
+    return Category.objects.get_or_create(name__iexact=name, defaults={"name": name})[0]
 
 
 def make_receipt(user, status=Receipt.Status.EXTRACTED):

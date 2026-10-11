@@ -48,7 +48,7 @@ class ToolTotalsTests(ToolFixtureMixin, TestCase):
 
     def test_get_spending_total_for_one_category_ignores_case(self):
         result = run_tool(self.alice, "get_spending_total", {**SEPTEMBER, "category": "FOOD"})
-        self.assertEqual(result["category"], "food")
+        self.assertEqual(result["category"], "Food")
         self.assertEqual(result["totals"], [{"currency": "JOD", "total": "20.00", "count": 1}])
 
     def test_get_spending_total_with_no_expenses(self):
@@ -63,9 +63,9 @@ class ToolTotalsTests(ToolFixtureMixin, TestCase):
     def test_get_spending_by_category(self):
         result = run_tool(self.alice, "get_spending_by_category", OCTOBER)
         self.assertEqual(result["categories"], [
-            {"category": "food", "currency": "USD", "total": "30.00", "count": 1},
-            {"category": "food", "currency": "JOD", "total": "19.75", "count": 2},
-            {"category": "transport", "currency": "JOD", "total": "4.00", "count": 1},
+            {"category": "Food", "currency": "USD", "total": "30.00", "count": 1},
+            {"category": "Food", "currency": "JOD", "total": "19.75", "count": 2},
+            {"category": "Transport", "currency": "JOD", "total": "4.00", "count": 1},
         ])
 
     def test_list_expenses(self):
@@ -76,7 +76,7 @@ class ToolTotalsTests(ToolFixtureMixin, TestCase):
             "id": result["expenses"][0]["id"],
             "date": "2026-10-31",
             "store_name": "Careem",
-            "category": "transport",
+            "category": "Transport",
             "total": "4.00",
             "currency": "JOD",
         })
@@ -233,7 +233,7 @@ class RunToolErrorTests(TestCase):
         self.assert_error("get_spending_total", None, "JSON object")
 
     def test_unknown_category_lists_the_valid_ones(self):
-        self.assert_error("get_spending_total", {**OCTOBER, "category": "yachts"}, "Valid categories: food")
+        self.assert_error("get_spending_total", {**OCTOBER, "category": "yachts"}, "Valid categories: Bills, Entertainment, Food, Health, Other, Shopping, Transport.")
 
     def test_bad_limit(self):
         for limit in [0, -3, "10", 2.5, True]:

@@ -159,7 +159,7 @@ class ProcessReceiptTests(TestCase):
         })
 
         preprocess.assert_called_once_with(result.receipt.image.path)
-        extract.assert_called_once_with("RAW TEXT", ["food", "transport"])
+        extract.assert_called_once_with("RAW TEXT", ["Bills", "Entertainment", "Food", "Health", "Other", "Shopping", "Transport"])
         self.assertEqual(result.receipt.user, self.user)
         self.assertEqual(result.receipt.status, Receipt.Status.EXTRACTED)
         self.assertEqual(result.receipt.raw_text, "RAW TEXT")
