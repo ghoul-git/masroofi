@@ -1,0 +1,15 @@
+{# Password-confirmed account deletion, shared by the account and withdraw consent pages. Set `source` when including. #}
+{% if delete_errors %}
+    <ul class="errors">
+        {% for error in delete_errors %}
+            <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+<form method="post" action="{% url 'account-delete' %}">
+    {% csrf_token %}
+    <input type="hidden" name="from" value="{{ source }}">
+    <label for="delete-password">Your current password</label>
+    <input type="password" id="delete-password" name="password" autocomplete="current-password" required>
+    <button type="submit" class="button button-danger">Delete my account and all my data</button>
+</form>

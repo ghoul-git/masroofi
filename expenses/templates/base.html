@@ -16,6 +16,7 @@
                 <a href="{% url 'upload' %}">Upload</a>
                 <a href="{% url 'expenses' %}">Expenses</a>
                 <a href="{% url 'chat' %}">Ask Masroofi</a>
+                <a href="{% url 'account' %}">Account</a>
                 <form method="post" action="{% url 'logout' %}">
                     {% csrf_token %}
                     <button type="submit" class="link-button">Log out</button>
@@ -30,6 +31,11 @@
     <main>
         {% block content %}{% endblock %}
     </main>
+
+    <footer class="site-footer">
+        <a href="{% url 'terms' %}">Terms of Service</a>
+        <a href="{% url 'privacy' %}">Privacy Policy</a>
+    </footer>
 
     {% block scripts %}{% endblock %}
 </body>

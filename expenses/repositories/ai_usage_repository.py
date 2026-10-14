@@ -12,3 +12,7 @@ def count_for_user(user, kind, since) -> int:
 def count_all_since(since) -> int:
     """Every user's AI requests since the given time, for the global daily cap."""
     return AIUsage.objects.filter(created_at__gte=since).count()
+
+
+def list_for_user(user):
+    return AIUsage.objects.filter(user=user).order_by("created_at", "id")

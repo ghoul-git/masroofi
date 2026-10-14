@@ -16,3 +16,7 @@ def get_for_update(user, receipt_id) -> Receipt | None:
 
 def update(user, receipt_id, **fields) -> int:
     return Receipt.objects.filter(user=user, pk=receipt_id).update(**fields)
+
+
+def list_for_user(user):
+    return Receipt.objects.filter(user=user).order_by("uploaded_at", "id")

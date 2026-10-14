@@ -1,0 +1,18 @@
+{# The three required consent boxes, shared by the register and consent pages. Unticked by default. #}
+<fieldset class="consent-fields">
+    <legend>Before you continue</legend>
+    <label class="checkbox">
+        <input type="checkbox" name="accept_terms" required{% if request.POST.accept_terms %} checked{% endif %}>
+        <span>I agree to the <a href="{% url 'terms' %}" target="_blank" rel="noopener">Terms of Service</a></span>
+    </label>
+    <label class="checkbox">
+        <input type="checkbox" name="accept_privacy" required{% if request.POST.accept_privacy %} checked{% endif %}>
+        <span>I agree to the processing of my receipt and expense data as described in the
+            <a href="{% url 'privacy' %}" target="_blank" rel="noopener">Privacy Policy</a>, including sending
+            receipt text to an AI provider outside Jordan</span>
+    </label>
+    <label class="checkbox">
+        <input type="checkbox" name="confirm_age" required{% if request.POST.confirm_age %} checked{% endif %}>
+        <span>I am 18 years or older</span>
+    </label>
+</fieldset>

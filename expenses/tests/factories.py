@@ -3,11 +3,20 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 
-from expenses.models import Category, Expense, Item, Receipt
+from expenses.models import Category, ConsentRecord, Expense, Item, Receipt
+from expenses.services.consent_service import current_versions
+
+PASSWORD = "test-pass-123"
+ALL_CONSENTS = {"accept_terms": True, "accept_privacy": True, "confirm_age": True}
 
 
-def make_user(username="alice"):
-    return get_user_model().objects.create_user(username=username, password="test-pass-123")
+def make_user(username="alice", consent=True):
+    """A user who has accepted the current Terms and Privacy versions, unless consent=False."""
+    user = get_user_model().objects.create_user(username=username, password=PASSWORD)
+    if consent:
+        terms_version, privacy_version = current_versions()
+        ConsentRecord.objects.create(user=user, terms_version=terms_version, privacy_version=privacy_version)
+    return user
 
 
 def make_category(name="food"):

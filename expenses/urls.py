@@ -1,14 +1,22 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
+from expenses.views import account_views, chat_views, expense_views, legal_views, receipt_views
 from expenses.views import auth_views as app_auth
-from expenses.views import chat_views, expense_views, receipt_views
 
 urlpatterns = [
     path("", app_auth.home, name="home"),
     path("register/", app_auth.register, name="register"),
     path("login/", auth_views.LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path("consent/", account_views.consent_page, name="consent"),
+    path("terms/", legal_views.terms, name="terms"),
+    path("privacy/", legal_views.privacy, name="privacy"),
+    path("account/", account_views.account_page, name="account"),
+    path("account/export/", account_views.export_data, name="account-export"),
+    path("account/withdraw/", account_views.withdraw_consent, name="account-withdraw"),
+    path("account/delete/", account_views.delete_account, name="account-delete"),
+    path("account/deleted/", account_views.account_deleted, name="account-deleted"),
     path("upload/", receipt_views.upload_page, name="upload"),
     path("expenses/", expense_views.expenses_page, name="expenses"),
     path("chat/", chat_views.chat_page, name="chat"),

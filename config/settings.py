@@ -82,6 +82,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    # Sends logged-in users who have not accepted the current Terms/Privacy versions to /consent/.
+    "expenses.middleware.ConsentRequiredMiddleware",
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -208,3 +210,10 @@ GLOBAL_DAILY_AI_CALLS = env_int("GLOBAL_DAILY_AI_CALLS", 500)
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# Versions of the Terms of Service and Privacy Policy. Changing either one asks every
+# user to accept again (see expenses.middleware.ConsentRequiredMiddleware).
+
+TERMS_VERSION = os.getenv("TERMS_VERSION", "").strip() or "1.0"
+PRIVACY_VERSION = os.getenv("PRIVACY_VERSION", "").strip() or "1.0"

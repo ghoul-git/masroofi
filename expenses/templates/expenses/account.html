@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Your account | Masroofi{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Your account</h1>
+    <p><strong>Username:</strong> {{ user.username }}<br>
+        <strong>Email:</strong> {{ user.email|default:"(none)" }}<br>
+        <strong>Member since:</strong> {{ user.date_joined|date:"j F Y" }}</p>
+    {% if latest_consent %}
+        <p class="muted">You accepted Terms of Service version {{ latest_consent.terms_version }} and Privacy Policy
+            version {{ latest_consent.privacy_version }} on {{ latest_consent.accepted_at|date:"j F Y" }}.</p>
+    {% endif %}
+</div>
+
+<div class="card section">
+    <h2>Download my data</h2>
+    <p>Get a copy of everything Masroofi stores about you as a JSON file: your profile, expenses and their
+        items, receipts (the text read from them), chat messages, AI usage records and consent records.</p>
+    <a class="button button-secondary" href="{% url 'account-export' %}">Download my data</a>
+</div>
+
+<div class="card section">
+    <h2>Withdraw consent</h2>
+    <p>You can withdraw your consent to the processing of your data at any time.</p>
+    <a class="button button-secondary" href="{% url 'account-withdraw' %}">Withdraw consent</a>
+</div>
+
+<div class="card section">
+    <h2>Delete my account</h2>
+    <p>This permanently deletes your account and all your data, including your receipt images.
+        It cannot be undone. You may want to download your data first.</p>
+    {% include "expenses/_delete_account_form.html" with source="account" %}
+</div>
+{% endblock %}

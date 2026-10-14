@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Withdraw consent | Masroofi{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Withdraw consent</h1>
+    <p>Masroofi can only store and process your receipts, expenses and chat messages with your consent.
+        If you withdraw it, your data can no longer be processed, so the only way to withdraw consent is to
+        delete your account and all your data, including your receipt images. This cannot be undone.</p>
+    <p>Before you continue, you may want to <a href="{% url 'account-export' %}">download a copy of your data</a>.</p>
+
+    {% include "expenses/_delete_account_form.html" with source="withdraw" %}
+
+    <p><a href="{% url 'account' %}">Keep my account</a></p>
+</div>
+{% endblock %}

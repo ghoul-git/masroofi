@@ -177,3 +177,33 @@ td.number, th.number { text-align: right; }
     gap: 0.5rem;
     margin-top: 1rem;
 }
+
+/* Consent checkboxes (register and consent pages) */
+.consent-fields {
+    border: 1px solid #e3e6ea;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin: 0 0 1rem;
+}
+.consent-fields legend { font-weight: 600; padding: 0 0.25rem; }
+label.checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-weight: normal;
+    margin: 0.5rem 0;
+}
+label.checkbox input { margin-top: 0.2rem; flex-shrink: 0; }
+
+/* Account page sections */
+.card.section { margin-top: 1.5rem; }
+
+/* Footer on every page */
+.site-footer {
+    display: flex;
+    justify-content: center;
+    gap: 1.5rem;
+    padding: 1.5rem 1rem 2rem;
+    font-size: 0.9rem;
+}
+.site-footer a { color: #52606d; }

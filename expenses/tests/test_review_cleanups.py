@@ -11,6 +11,7 @@ from django.test import SimpleTestCase, TestCase
 from expenses.models import Category
 from expenses.repositories import receipt_repository
 from expenses.services import expense_service, receipt_service, user_service, validation
+from expenses.tests.factories import ALL_CONSENTS
 
 User = get_user_model()
 
@@ -37,8 +38,8 @@ class ValidationModuleTests(SimpleTestCase):
 
 
 class ReceiptRepositoryTests(SimpleTestCase):
-    def test_unused_functions_are_removed(self):
-        self.assertFalse(hasattr(receipt_repository, "list_for_user"))
+    def test_unused_delete_is_removed(self):
+        # list_for_user was removed in the code review and brought back for the data export.
         self.assertFalse(hasattr(receipt_repository, "delete"))
 
 
@@ -52,9 +53,9 @@ class StylesheetTests(TestCase):
 
 class RegisterUserTests(TestCase):
     def test_duplicate_username_is_rejected(self):
-        user_service.register_user("alice", "", "a-strong-pass-123")
+        user_service.register_user("alice", "", "a-strong-pass-123", ALL_CONSENTS)
         with self.assertRaises(ValidationError) as ctx:
-            user_service.register_user("alice", "", "a-strong-pass-123")
+            user_service.register_user("alice", "", "a-strong-pass-123", ALL_CONSENTS)
         self.assertEqual(ctx.exception.messages, ["Username is already taken."])
 
     def test_duplicate_caught_by_the_database_gives_the_same_error(self):
@@ -63,7 +64,7 @@ class RegisterUserTests(TestCase):
         with mock.patch.object(User.objects, "filter") as filter_:
             filter_.return_value.exists.return_value = False
             with self.assertRaises(ValidationError) as ctx:
-                user_service.register_user("alice", "", "a-strong-pass-123")
+                user_service.register_user("alice", "", "a-strong-pass-123", ALL_CONSENTS)
         self.assertEqual(ctx.exception.messages, ["Username is already taken."])
         # The failed insert was rolled back to a savepoint, so the connection still works.
         self.assertEqual(User.objects.filter(username="alice").count(), 1)
@@ -71,16 +72,19 @@ class RegisterUserTests(TestCase):
     def test_invalid_email_is_rejected(self):
         for email in ["not-an-email", "a@", "@b.com", "a b@c.com"]:
             with self.subTest(email=email), self.assertRaises(ValidationError) as ctx:
-                user_service.register_user("bob", email, "a-strong-pass-123")
+                user_service.register_user("bob", email, "a-strong-pass-123", ALL_CONSENTS)
             self.assertEqual(ctx.exception.messages, ["Enter a valid email address."])
         self.assertFalse(User.objects.filter(username="bob").exists())
 
     def test_valid_or_empty_email_is_accepted(self):
-        self.assertEqual(user_service.register_user("bob", "bob@example.com", "a-strong-pass-123").email, "bob@example.com")
-        self.assertEqual(user_service.register_user("carol", "", "a-strong-pass-123").email, "")
+        self.assertEqual(user_service.register_user("bob", "bob@example.com", "a-strong-pass-123", ALL_CONSENTS).email, "bob@example.com")
+        self.assertEqual(user_service.register_user("carol", "", "a-strong-pass-123", ALL_CONSENTS).email, "")
 
     def test_register_page_shows_the_email_error(self):
-        response = self.client.post("/register/", {"username": "dan", "email": "nope", "password": "a-strong-pass-123"})
+        response = self.client.post("/register/", {
+            "username": "dan", "email": "nope", "password": "a-strong-pass-123",
+            "accept_terms": "on", "accept_privacy": "on", "confirm_age": "on",
+        })
         self.assertContains(response, "Enter a valid email address.")
 
 

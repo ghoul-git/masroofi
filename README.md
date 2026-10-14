@@ -37,6 +37,12 @@ receipt photo
 
 The project combines three areas of AI: **computer vision** (OpenCV image preprocessing and EasyOCR text recognition), **natural language processing** (LLM extraction of structured fields from noisy OCR text in Arabic and English), and **agentic AI** (a tool-calling agent that decides which database queries to run to answer a question).
 
+**Privacy and consent.** Receipts and spending are personal data, so the app is built around Jordan's Personal Data Protection Law:
+
+- **Consent before any processing.** Registration requires three unticked boxes: the Terms of Service, the processing of receipt and expense data as described in the Privacy Policy (including sending receipt text to an AI provider outside Jordan), and confirming the user is 18 or older. Each acceptance is saved as a `ConsentRecord` with the Terms and Privacy versions.
+- **New versions need new consent.** When `TERMS_VERSION` or `PRIVACY_VERSION` changes, every user is sent to `/consent/` after login until they accept again. Users who registered before consent existed are treated the same way.
+- **Access and erasure.** On `/account/` a user can download all their data as JSON, or delete their account. Deleting needs the current password and removes every row and every receipt image file. Withdrawing consent leads to the same deletion, because without consent the data can no longer be processed.
+
 ## 3. Technologies Used
 
 | Area | Technology | Version | Used for |
@@ -82,7 +88,8 @@ masroofi/
     │   ├── expense.py              A confirmed expense: store, date, total, currency, category
     │   ├── item.py                 Line items of an expense
     │   ├── chat_message.py         Saved chat questions and answers, with the tools used for each answer
-    │   └── ai_usage.py             One row per receipt processed and question answered, with OpenAI token counts
+    │   ├── ai_usage.py             One row per receipt processed and question answered, with OpenAI token counts
+    │   └── consent_record.py       Which Terms and Privacy versions a user accepted, and when
     ├── ai/                         Computer vision, NLP and agent code
     │   ├── preprocessing.py        OpenCV: resize, grayscale, denoise, CLAHE contrast
     │   ├── ocr.py                  EasyOCR reader (Arabic + English), loaded once and reused
@@ -101,26 +108,35 @@ masroofi/
     │   ├── user_service.py         User registration: email format, duplicate usernames
     │   ├── validation.py           Amount and date parsing and limits, shared by the expense and receipt services
     │   ├── usage_service.py        Usage limits (checked before any AI call), usage recording, "12 of 30" labels
+    │   ├── consent_service.py      The three required consents, recording them, checking the current versions
+    │   ├── account_service.py      Data export (JSON) and password-confirmed account deletion
     │   └── exceptions.py           LimitReached and ServiceUnavailable, returned by the API as 429 and 503
     ├── repositories/               All database queries
     │   ├── receipt_repository.py
     │   ├── expense_repository.py   Includes the Sum/Count aggregations used by the chat tools
     │   ├── category_repository.py
     │   ├── chat_repository.py
-    │   └── ai_usage_repository.py
+    │   ├── ai_usage_repository.py
+    │   ├── consent_repository.py
+    │   └── user_repository.py      Deleting a user (everything else is removed by cascade)
     ├── serializers/                DRF serializers that shape API input and output
     ├── views/                      Thin HTTP layer
     │   ├── api.py                  Base API view: session login required, maps service errors to 400/404/429/503
     │   ├── auth_views.py           Register and home pages
     │   ├── receipt_views.py        Upload page, owner-only receipt image, receipt upload and confirm API
     │   ├── expense_views.py        Expenses page, paginated expense list, update and delete API
-    │   └── chat_views.py           Chat page, chat and history API
-    ├── templates/                  HTML pages (base layout, login, register, home, upload, expenses, chat, 404, 500)
+    │   ├── chat_views.py           Chat page, chat and history API
+    │   ├── account_views.py        Consent page, account page, data download, withdraw consent, delete account
+    │   └── legal_views.py          Terms of Service and Privacy Policy pages
+    ├── templates/                  HTML pages (base layout with footer, login, register, home, upload, expenses, chat,
+    │                               consent, account, terms, privacy, 404, 500)
     ├── static/expenses/
     │   ├── css/main.css            Styles for every page
     │   └── js/                     Plain JavaScript for the pages (api.js holds the shared fetch + CSRF helper)
     ├── tests/                      Tests for the services, tools, agent, API, pagination and per-user data and image isolation
     ├── migrations/                 Database migrations (0002 creates the 7 default categories as data)
+    ├── middleware.py               ConsentRequiredMiddleware: sends users without current consent to /consent/
+    ├── signals.py                  Deletes a receipt's image file whenever its Receipt row is deleted
     ├── admin.py                    Django admin registration
     └── urls.py                     Page and API routes
 ```
@@ -228,7 +244,7 @@ This also creates the 7 expense categories (Food, Transport, Bills, Shopping, He
 python manage.py createsuperuser
 ```
 
-This account can log in to the admin site and also use the app.
+This account can log in to the admin site and also use the app. Accounts created this way have not accepted the Terms and Privacy Policy, so the first time they open the app they are asked to on `/consent/`. The admin site does not ask.
 
 ### Step 8: Start the server
 
@@ -246,6 +262,8 @@ Then open:
 | http://127.0.0.1:8000/upload/ | Upload a receipt, review the extracted fields and save |
 | http://127.0.0.1:8000/expenses/ | Your expenses, with edit and delete |
 | http://127.0.0.1:8000/chat/ | Ask Masroofi about your spending |
+| http://127.0.0.1:8000/account/ | Download your data, withdraw consent or delete your account |
+| http://127.0.0.1:8000/terms/, http://127.0.0.1:8000/privacy/ | Terms of Service and Privacy Policy (placeholders), linked in the footer of every page |
 | http://127.0.0.1:8000/admin/ | Django admin (superuser) |
 
 The first receipt you process takes longer than the rest while EasyOCR downloads and loads its models.
@@ -300,10 +318,12 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | `FREE_RECEIPTS_PER_MONTH` | No (defaults to `30`) | Receipts each user can process per calendar month (Jordan time). Staff users have no limit. |
 | `FREE_CHAT_PER_DAY` | No (defaults to `20`) | Chat questions each user can ask per day (Jordan time). Staff users have no limit. |
 | `GLOBAL_DAILY_AI_CALLS` | No (defaults to `500`) | Receipts processed plus questions answered per day for all users together, staff included. Caps the daily OpenAI cost. |
+| `TERMS_VERSION` | No (defaults to `1.0`) | Current version of the Terms of Service. Change it when the terms change: every user must accept again on `/consent/` before using the app. |
+| `PRIVACY_VERSION` | No (defaults to `1.0`) | Current version of the Privacy Policy. Change it when the policy changes: every user must accept again. |
 
 ## API Endpoints
 
-All endpoints return JSON, require a logged-in session (log in through `/login/` first), and need the `X-CSRFToken` header on `POST`, `PATCH` and `DELETE` requests. A request without a logged-in session gets `403`.
+All endpoints return JSON, require a logged-in session (log in through `/login/` first), and need the `X-CSRFToken` header on `POST`, `PATCH` and `DELETE` requests. A request without a logged-in session gets `403`. So does a request from a user who has not accepted the current Terms and Privacy Policy, with a `detail` asking them to accept first.
 
 The two endpoints that call OpenAI check the usage limits first. When a limit is reached they return `429` with a message in `detail` (for example "You have asked 20 questions today, which is the daily limit. You can ask more tomorrow."), and nothing is sent to OpenAI. Their successful responses include `usage`: `{"used", "limit", "limit_reached", "label"}`, where `label` is the text shown on the page, such as "12 of 30 receipts this month". `limit` is `null` for staff users.
 
@@ -331,6 +351,11 @@ Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/im
 - **Depends on a paid external API.** Extraction and chat need an OpenAI API key and internet access. Each receipt and question costs API usage. The usage limits cap the total, and token counts are saved in `AIUsage`, but there is no usage report page.
 - **No currency conversion.** Totals in different currencies are reported separately and never added together. "Top expenses" ranks by the raw amount regardless of currency.
 - **Categories are shared** by all users, and are managed by an administrator rather than by each user.
+- **Legal pages are placeholders.** `/terms/` and `/privacy/` only say "Content coming soon". Real texts, reviewed by a lawyer against Jordan's Personal Data Protection Law, are needed before launch, and the consent flow alone is not legal advice.
+- **Age is self-declared.** The 18+ box is not verified.
+- **Consent is all or nothing.** Withdrawing consent means deleting the account; there is no way to keep the account while stopping only the AI processing.
+- **Deletion limits.** Deleting an account removes the data from the database and the receipt images from disk, but not from database backups, and not text already sent to OpenAI, which keeps it according to its own retention policy. Empty `media/receipts/<user id>/` folders are left behind.
+- **The data download has no images.** The JSON includes the text read from each receipt and the image file name, but not the image files themselves.
 - **Short chat memory.** The assistant only sees the last 10 messages of the conversation.
 - **Item editing is limited.** Items can be edited on the review form before saving, but the expenses page only edits the main fields. The API supports replacing items.
 - **No pagination on chat history.** The chat page loads the whole conversation at once.

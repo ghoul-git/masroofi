@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Account deleted | Masroofi{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Your account has been deleted</h1>
+    <p>Your account and all your data, including your receipt images, have been permanently deleted,
+        and you have been logged out.</p>
+    <p>Thank you for using Masroofi.</p>
+    <a class="button" href="{% url 'register' %}">Create a new account</a>
+</div>
+{% endblock %}
