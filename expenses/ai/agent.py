@@ -10,10 +10,18 @@ from expenses.ai.tools import TOOL_SCHEMAS, run_tool
 MAX_STEPS = 5
 
 
+def _add_usage(total: dict, response) -> None:
+    usage = getattr(response, "usage", None)  # can be missing
+    total["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+    total["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+
+
 def answer(user, question: str, history: list[dict]) -> dict:
-    """Run the tool-calling loop and return the answer plus the tools used."""
+    """Run the tool-calling loop and return the answer, the tools used, and the
+    token usage summed over every model call in the loop."""
     input_items = [*history, {"role": "user", "content": question}]
     tools_used = []
+    usage = {"input_tokens": 0, "output_tokens": 0}
 
     for _ in range(MAX_STEPS):
         response = get_client().responses.create(
@@ -22,9 +30,10 @@ def answer(user, question: str, history: list[dict]) -> dict:
             input=input_items,
             tools=TOOL_SCHEMAS,
         )
+        _add_usage(usage, response)
         calls = [item for item in response.output if item.type == "function_call"]
         if not calls:
-            return {"answer": response.output_text, "tools_used": tools_used}
+            return {"answer": response.output_text, "tools_used": tools_used, "usage": usage}
 
         input_items += response.output
         for call in calls:
@@ -42,4 +51,8 @@ def answer(user, question: str, history: list[dict]) -> dict:
                 "output": json.dumps(result, default=str),
             })
 
-    return {"answer": "Sorry, I could not work that out. Please rephrase the question.", "tools_used": tools_used}
+    return {
+        "answer": "Sorry, I could not work that out. Please rephrase the question.",
+        "tools_used": tools_used,
+        "usage": usage,
+    }

@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from expenses.models import Expense, Receipt
+from expenses.models import AIUsage, Expense, Receipt
 from expenses.repositories import category_repository, expense_repository, receipt_repository
+from expenses.services import usage_service
 from expenses.services.expense_service import clean_expense_data
 from expenses.services.validation import (
     DEFAULT_CURRENCY,
@@ -23,6 +24,7 @@ class ProcessedReceipt:
     receipt: Receipt
     fields: dict = field(default_factory=dict)
     confidence: float = 0.0
+    usage: dict = field(default_factory=dict)  # usage_service.receipt_usage after this receipt
 
 
 def _empty_fields() -> dict:
@@ -87,7 +89,13 @@ def process_receipt(user, image_file) -> ProcessedReceipt:
 
     Any failure in the AI steps marks the receipt as failed instead of raising,
     so the user can still fill in the fields by hand and confirm.
+
+    Raises LimitReached, before the image is saved or anything is sent to
+    OpenAI, when a usage limit has been reached. Every processed receipt,
+    failed or not, is recorded as one AIUsage row.
     """
+    usage_service.check_receipt_allowed(user)
+
     # Imported here because loading EasyOCR pulls in PyTorch, which would
     # otherwise slow down every Django start.
     from expenses.ai.extraction import extract_fields
@@ -95,22 +103,24 @@ def process_receipt(user, image_file) -> ProcessedReceipt:
     from expenses.ai.preprocessing import preprocess
 
     receipt = receipt_repository.create(user, image_file)
-    raw_text, confidence, fields = "", 0.0, _empty_fields()
+    raw_text, confidence, fields, tokens = "", 0.0, _empty_fields(), None
 
     try:
         image = preprocess(receipt.image.path)
         raw_text, confidence = read_text(image)
         if not raw_text.strip():
             raise ValueError("OCR found no text in the image.")
-        fields = _normalize_fields(extract_fields(raw_text, category_repository.list_names()))
+        extracted, tokens = extract_fields(raw_text, category_repository.list_names())
+        fields = _normalize_fields(extracted)
         status = Receipt.Status.EXTRACTED
     except Exception:
         logger.exception("Processing failed for receipt %s", receipt.pk)
         status = Receipt.Status.FAILED
 
+    usage_service.record(user, AIUsage.Kind.RECEIPT, tokens)
     receipt_repository.update(user, receipt.pk, raw_text=raw_text, status=status)
     receipt = receipt_repository.get(user, receipt.pk)
-    return ProcessedReceipt(receipt=receipt, fields=fields, confidence=confidence)
+    return ProcessedReceipt(receipt=receipt, fields=fields, confidence=confidence, usage=usage_service.receipt_usage(user))
 
 
 def get_receipt(user, receipt_id) -> Receipt:

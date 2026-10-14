@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% comment %}
+Rendered by Django's server_error view without a request context, so nothing
+here (or in base.html) may rely on the logged-in user. The error itself is
+written to the server log, never shown here.
+{% endcomment %}
+
+{% block title %}Something went wrong | Masroofi{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Something went wrong</h1>
+    <p>Sorry, something went wrong on our side. Please try again in a few minutes.</p>
+    <div class="actions">
+        <a class="button" href="{% url 'home' %}">Go to the home page</a>
+    </div>
+</div>
+{% endblock %}

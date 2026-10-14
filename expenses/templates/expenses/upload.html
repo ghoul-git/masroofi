@@ -7,12 +7,16 @@
 {% csrf_token %}
 <div class="card">
     <h1>Upload a receipt</h1>
+    <p class="muted" id="usage">{{ usage.label }}</p>
+    {% if usage.limit_reached %}
+        <p class="notice">You have used all your free receipt scans for this month. You can still view and edit your saved expenses.</p>
+    {% endif %}
 
     <form id="upload-form">
         <label for="receipt-image">Receipt photo</label>
-        <input type="file" id="receipt-image" name="image" accept="image/*" required>
+        <input type="file" id="receipt-image" name="image" accept="image/*" required{% if usage.limit_reached %} disabled{% endif %}>
         <ul class="errors" id="upload-errors" hidden></ul>
-        <button type="submit" class="button" id="upload-button">Read receipt</button>
+        <button type="submit" class="button" id="upload-button"{% if usage.limit_reached %} disabled{% endif %}>Read receipt</button>
     </form>
 
     <p id="loading" class="muted" hidden>

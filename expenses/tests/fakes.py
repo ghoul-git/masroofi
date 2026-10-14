@@ -11,12 +11,19 @@ def function_call(name, arguments, call_id="call_1"):
     return SimpleNamespace(type="function_call", name=name, arguments=arguments, call_id=call_id)
 
 
-def text_response(text):
-    return SimpleNamespace(output=[SimpleNamespace(type="message")], output_text=text)
+def _usage(tokens):
+    """tokens is (input_tokens, output_tokens), or None for a response without usage."""
+    if tokens is None:
+        return None
+    return SimpleNamespace(input_tokens=tokens[0], output_tokens=tokens[1], total_tokens=sum(tokens))
 
 
-def tool_response(*calls):
-    return SimpleNamespace(output=list(calls), output_text="")
+def text_response(text, tokens=None):
+    return SimpleNamespace(output=[SimpleNamespace(type="message")], output_text=text, usage=_usage(tokens))
+
+
+def tool_response(*calls, tokens=None):
+    return SimpleNamespace(output=list(calls), output_text="", usage=_usage(tokens))
 
 
 class FakeOpenAI:

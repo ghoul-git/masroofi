@@ -110,7 +110,9 @@
         showErrors(uploadErrors, []);
         setLoading(true);
         try {
-            fillReviewForm(await apiFetch("/api/receipts/", { method: "POST", body }));
+            const result = await apiFetch("/api/receipts/", { method: "POST", body });
+            document.getElementById("usage").textContent = result.usage.label;
+            fillReviewForm(result);
         } catch (error) {
             showErrors(uploadErrors, error.messages || [String(error)]);
         } finally {

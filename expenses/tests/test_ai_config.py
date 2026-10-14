@@ -54,12 +54,14 @@ class SharedClientTests(SimpleTestCase):
     def test_extraction_sends_the_prompt_file_with_categories(self):
         create = mock.Mock(return_value=SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content='{"store_name": "Cozmo"}'))],
+            usage=SimpleNamespace(prompt_tokens=310, completion_tokens=42, total_tokens=352),
         ))
         fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
         with mock.patch("expenses.ai.extraction.get_client", return_value=fake):
-            result = extraction.extract_fields("RAW", ["Bills", "Food"])
+            result, usage = extraction.extract_fields("RAW", ["Bills", "Food"])
 
         self.assertEqual(result, {"store_name": "Cozmo"})
+        self.assertEqual(usage, {"input_tokens": 310, "output_tokens": 42})
         messages = create.call_args.kwargs["messages"]
         self.assertEqual(messages[0]["content"], load_prompt("receipt_extraction", categories="Bills, Food"))
         self.assertEqual(messages[1], {"role": "user", "content": "RAW"})

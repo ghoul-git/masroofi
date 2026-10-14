@@ -50,6 +50,7 @@ The project combines three areas of AI: **computer vision** (OpenCV image prepro
 | LLM | OpenAI Python SDK | 3.28.0 | Chat Completions (JSON mode) for field extraction, Responses API with function tools for the chat agent |
 | Images | Pillow, NumPy | 12.3.0 / 2.4.6 | Image upload validation, image arrays |
 | Configuration | python-dotenv | 1.2.4 | Loading settings from `.env` |
+| Static files | WhiteNoise | 6.12.0 | Serving CSS and JavaScript in production, compressed and cached |
 | Frontend | Django templates, plain JavaScript (`fetch`), CSS | | Upload, review, expenses and chat pages |
 | Testing | Django test runner, `unittest.mock` | | Unit and API tests, with the OpenAI client and OCR mocked |
 
@@ -80,7 +81,8 @@ masroofi/
     │   ├── receipt.py              Uploaded image (saved as receipts/<user id>/<random name>), OCR text and status
     │   ├── expense.py              A confirmed expense: store, date, total, currency, category
     │   ├── item.py                 Line items of an expense
-    │   └── chat_message.py         Saved chat questions and answers, with the tools used for each answer
+    │   ├── chat_message.py         Saved chat questions and answers, with the tools used for each answer
+    │   └── ai_usage.py             One row per receipt processed and question answered, with OpenAI token counts
     ├── ai/                         Computer vision, NLP and agent code
     │   ├── preprocessing.py        OpenCV: resize, grayscale, denoise, CLAHE contrast
     │   ├── ocr.py                  EasyOCR reader (Arabic + English), loaded once and reused
@@ -98,20 +100,22 @@ masroofi/
     │   ├── category_service.py     Category list for the dropdowns
     │   ├── user_service.py         User registration: email format, duplicate usernames
     │   ├── validation.py           Amount and date parsing and limits, shared by the expense and receipt services
-    │   └── exceptions.py           ServiceUnavailable, returned by the API as 503
+    │   ├── usage_service.py        Usage limits (checked before any AI call), usage recording, "12 of 30" labels
+    │   └── exceptions.py           LimitReached and ServiceUnavailable, returned by the API as 429 and 503
     ├── repositories/               All database queries
     │   ├── receipt_repository.py
     │   ├── expense_repository.py   Includes the Sum/Count aggregations used by the chat tools
     │   ├── category_repository.py
-    │   └── chat_repository.py
+    │   ├── chat_repository.py
+    │   └── ai_usage_repository.py
     ├── serializers/                DRF serializers that shape API input and output
     ├── views/                      Thin HTTP layer
-    │   ├── api.py                  Base API view: session login required, maps service errors to 400/404/503
+    │   ├── api.py                  Base API view: session login required, maps service errors to 400/404/429/503
     │   ├── auth_views.py           Register and home pages
     │   ├── receipt_views.py        Upload page, owner-only receipt image, receipt upload and confirm API
     │   ├── expense_views.py        Expenses page, paginated expense list, update and delete API
     │   └── chat_views.py           Chat page, chat and history API
-    ├── templates/                  HTML pages (base layout, login, register, home, upload, expenses, chat)
+    ├── templates/                  HTML pages (base layout, login, register, home, upload, expenses, chat, 404, 500)
     ├── static/expenses/
     │   ├── css/main.css            Styles for every page
     │   └── js/                     Plain JavaScript for the pages (api.js holds the shared fetch + CSRF helper)
@@ -121,7 +125,7 @@ masroofi/
     └── urls.py                     Page and API routes
 ```
 
-Files created at run time and kept out of Git: `.env` (secrets), `.venv/` (virtual environment) and `media/` (uploaded receipt images). Receipt images are never served from a public URL: `/receipts/<id>/image/` returns an image only to the user who uploaded it.
+Files created at run time and kept out of Git: `.env` (secrets), `.venv/` (virtual environment), `media/` (uploaded receipt images) and `staticfiles/` (output of `collectstatic`). Receipt images are never served from a public URL: `/receipts/<id>/image/` returns an image only to the user who uploaded it.
 
 ## 5. How to Run the Project
 
@@ -208,7 +212,7 @@ Open `.env` and fill in your own values (see [Environment Variables](#6-environm
 python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
 
-Keep `DEBUG=True` for local development. With `DEBUG=False`, Django rejects requests because `ALLOWED_HOSTS` is empty, and `runserver` stops serving the pages' CSS and JavaScript files.
+Keep `DEBUG=True` for local development. `DEBUG=False` switches on the production settings (HTTPS only, secure cookies, compressed static files), which need the extra steps in [Running in production](#running-in-production).
 
 ### Step 6: Run the migrations
 
@@ -254,6 +258,25 @@ python manage.py test expenses
 
 The tests mock the OpenAI client and the OCR step, so they need neither an API key nor internet access. They do need the PostgreSQL user to have `CREATEDB` (step 4).
 
+### Running in production
+
+With `DEBUG=False`, `config/settings.py` turns on the production settings:
+
+- Secure session and CSRF cookies, `SECURE_SSL_REDIRECT`, HSTS, `X_FRAME_OPTIONS = "DENY"` and `SECURE_CONTENT_TYPE_NOSNIFF`.
+- `SECURE_PROXY_SSL_HEADER`: Django trusts the `X-Forwarded-Proto` header to know a request came over HTTPS. Only deploy behind a proxy or hosting platform that sets that header itself, never with Django open to the internet directly.
+- Static files served by WhiteNoise, with hashed file names and compression.
+- Custom 404 and 500 pages with no technical details. Errors are written to the console log with a timestamp.
+
+Before starting the app:
+
+1. In `.env`, set `DEBUG=False`, a new random `SECRET_KEY`, `ALLOWED_HOSTS` (your domain) and `CSRF_TRUSTED_ORIGINS` (`https://` plus your domain).
+2. Run the migrations: `python manage.py migrate`
+3. Collect the static files into `staticfiles/`: `python manage.py collectstatic --noinput`. Run it again after every deploy, or the pages cannot find their CSS and JavaScript.
+4. Check the settings: `python manage.py check --deploy`
+5. Serve `config.wsgi:application` with a production WSGI server, not `runserver`. One is not included in `requirements.txt`.
+
+`media/` (receipt images) must be on a disk that persists between deploys.
+
 ## 6. Environment Variables
 
 All variables are read from `.env` in the project root. `.env` is listed in `.gitignore` and must never be committed. [.env.example](.env.example) lists them with placeholder values.
@@ -261,7 +284,12 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | Variable | Required | Used for |
 |---|---|---|
 | `SECRET_KEY` | Yes | Django's secret key, used to sign sessions and CSRF tokens. Use a long random value and keep it private. |
-| `DEBUG` | No (defaults to off) | `True` turns on Django debug mode for local development: detailed error pages and serving of static files. Any other value turns it off. Never use `True` in production. |
+| `DEBUG` | No (defaults to off) | `True` turns on Django debug mode for local development: detailed error pages, and static files served without `collectstatic`. Any other value turns it off and switches on the production settings. Never use `True` in production. |
+| `ALLOWED_HOSTS` | Yes, when `DEBUG=False` | Comma-separated domain names the site is served from, such as `masroofi.example.com,www.masroofi.example.com`. With `DEBUG=True` and this empty, only `localhost` is allowed. |
+| `CSRF_TRUSTED_ORIGINS` | Yes, when `DEBUG=False` | Comma-separated full origins, with the scheme, such as `https://masroofi.example.com`. Needed for logins and form posts over HTTPS. |
+| `SECURE_SSL_REDIRECT` | No (defaults to `True`) | Only used when `DEBUG=False`: redirect every plain HTTP request to HTTPS. Set to `False` only if your hosting platform already does this redirect. |
+| `SECURE_HSTS_SECONDS` | No (defaults to `3600`) | Only used when `DEBUG=False`: how long browsers must use HTTPS only for the site. Start low and raise it (for example to `31536000`, one year) once HTTPS works reliably, because browsers remember it. |
+| `SECURE_HSTS_INCLUDE_SUBDOMAINS` | No (defaults to `False`) | Only used when `DEBUG=False`: `True` applies the HSTS rule to every subdomain too. |
 | `DB_NAME` | Yes | Name of the PostgreSQL database. |
 | `DB_USER` | Yes | PostgreSQL user that Django connects as. Needs `CREATEDB` to run the tests. |
 | `DB_PASSWORD` | Yes | Password of that PostgreSQL user. |
@@ -269,19 +297,24 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | `DB_PORT` | No (defaults to `5432`) | Port PostgreSQL listens on. |
 | `OPENAI_API_KEY` | Yes, for receipts and chat | OpenAI API key used for receipt field extraction and the chat assistant. |
 | `OPENAI_MODEL` | Yes, for receipts and chat | Name of the OpenAI model used for both receipt field extraction and the chat assistant. |
+| `FREE_RECEIPTS_PER_MONTH` | No (defaults to `30`) | Receipts each user can process per calendar month (Jordan time). Staff users have no limit. |
+| `FREE_CHAT_PER_DAY` | No (defaults to `20`) | Chat questions each user can ask per day (Jordan time). Staff users have no limit. |
+| `GLOBAL_DAILY_AI_CALLS` | No (defaults to `500`) | Receipts processed plus questions answered per day for all users together, staff included. Caps the daily OpenAI cost. |
 
 ## API Endpoints
 
 All endpoints return JSON, require a logged-in session (log in through `/login/` first), and need the `X-CSRFToken` header on `POST`, `PATCH` and `DELETE` requests. A request without a logged-in session gets `403`.
 
+The two endpoints that call OpenAI check the usage limits first. When a limit is reached they return `429` with a message in `detail` (for example "You have asked 20 questions today, which is the daily limit. You can ask more tomorrow."), and nothing is sent to OpenAI. Their successful responses include `usage`: `{"used", "limit", "limit_reached", "label"}`, where `label` is the text shown on the page, such as "12 of 30 receipts this month". `limit` is `null` for staff users.
+
 | Method | URL | Description |
 |---|---|---|
-| `POST` | `/api/receipts/` | Upload a receipt image (`multipart/form-data`, field `image`, max 10 MB). Runs preprocessing, OCR and extraction, and returns the receipt with its status and the extracted fields. If reading fails, the status is `failed` and the fields are empty so they can be filled in by hand. |
+| `POST` | `/api/receipts/` | Upload a receipt image (`multipart/form-data`, field `image`, max 10 MB). Runs preprocessing, OCR and extraction, and returns the receipt with its status, the extracted fields and `usage`. If reading fails, the status is `failed` and the fields are empty so they can be filled in by hand. |
 | `POST` | `/api/receipts/<id>/confirm/` | Save the reviewed fields (`store_name`, `date`, `total`, `currency`, `category`, `items`) as an expense and mark the receipt `confirmed`. Returns `400` with a message per invalid field. |
 | `GET` | `/api/expenses/` | List your expenses, newest first, with their items, 20 per page. Returns `{"count", "next", "previous", "results"}`; use `?page=2` and so on for later pages. A page past the end returns `404`. |
 | `PATCH` | `/api/expenses/<id>/` | Update some fields of one of your expenses. Sending `items` replaces all items. |
 | `DELETE` | `/api/expenses/<id>/` | Delete one of your expenses. |
-| `POST` | `/api/chat/` | Ask a question (`{"question": "..."}`, max 1,000 characters). Returns the answer, the tools the agent used, and the response time in seconds. Returns `503` if the OpenAI API fails. |
+| `POST` | `/api/chat/` | Ask a question (`{"question": "..."}`, max 1,000 characters). Returns the answer, the tools the agent used, the response time in seconds and `usage`. Returns `503` if the OpenAI API fails; a failed question does not count towards the limit. |
 | `GET` | `/api/chat/history/` | Your saved chat messages, oldest first. Assistant messages include `tools_used`. |
 
 Another user's receipt or expense id returns `404`, the same as an id that does not exist.
@@ -290,11 +323,12 @@ Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/im
 
 ## Known Limitations
 
-- **Not production ready.** The settings are for local development: `ALLOWED_HOSTS` is empty, uploaded images are stored on the local disk in `media/` (served only to their owner, through Django), and there is no rate limiting on the endpoints that call OpenAI.
+- **Images on the local disk.** Uploaded receipt images are stored in `media/` on the server (served only to their owner, through Django), so a deployment needs a persistent disk. There is no cloud storage option.
+- **Limits are counted, not locked.** Two requests sent at exactly the same moment can both pass the limit check, so a user or the global cap can go slightly over the limit. Every receipt processed counts, including ones that could not be read.
 - **Receipt processing is synchronous.** The upload request waits for OCR and the LLM to finish, which can take up to a minute on CPU. There is no background job queue.
 - **OCR runs on the CPU.** EasyOCR is configured with `gpu=False`, so it works on any machine but is slow, and its first use needs internet access to download the models.
 - **Extraction is not always right.** Very blurry, crumpled or faded receipts can be misread or fail completely. The review step exists for this, but the user has to check the values.
-- **Depends on a paid external API.** Extraction and chat need an OpenAI API key and internet access, and each receipt and question costs API usage.
+- **Depends on a paid external API.** Extraction and chat need an OpenAI API key and internet access. Each receipt and question costs API usage. The usage limits cap the total, and token counts are saved in `AIUsage`, but there is no usage report page.
 - **No currency conversion.** Totals in different currencies are reported separately and never added together. "Top expenses" ranks by the raw amount regardless of currency.
 - **Categories are shared** by all users, and are managed by an administrator rather than by each user.
 - **Short chat memory.** The assistant only sees the last 10 messages of the conversation.

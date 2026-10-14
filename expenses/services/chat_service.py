@@ -5,8 +5,9 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from expenses.ai import agent
-from expenses.models import ChatMessage
+from expenses.models import AIUsage, ChatMessage
 from expenses.repositories import chat_repository
+from expenses.services import usage_service
 from expenses.services.exceptions import ServiceUnavailable
 
 logger = logging.getLogger(__name__)
@@ -18,14 +19,18 @@ MAX_QUESTION_LENGTH = 1000
 def ask(user, question) -> dict:
     """Answer a question about the user's expenses and save both messages.
 
-    Returns {"answer", "tools_used", "response_time"} with the time in seconds.
-    Nothing is saved when the assistant fails.
+    Returns {"answer", "tools_used", "response_time", "usage"} with the time in
+    seconds and usage as returned by usage_service.chat_usage.
+    Raises LimitReached before calling OpenAI when a usage limit has been reached.
+    Nothing is saved or counted when the assistant fails.
     """
     if not isinstance(question, str) or not question.strip():
         raise ValidationError({"question": ["Please type a question."]})
     question = question.strip()
     if len(question) > MAX_QUESTION_LENGTH:
         raise ValidationError({"question": [f"Questions can be at most {MAX_QUESTION_LENGTH} characters."]})
+
+    usage_service.check_chat_allowed(user)
 
     history = [{"role": m.role, "content": m.content} for m in chat_repository.recent(user, HISTORY_SIZE)]
 
@@ -40,11 +45,13 @@ def ask(user, question) -> dict:
     with transaction.atomic():
         chat_repository.create(user, ChatMessage.Role.USER, question)
         chat_repository.create(user, ChatMessage.Role.ASSISTANT, result["answer"], tools_used=result["tools_used"])
+        usage_service.record(user, AIUsage.Kind.CHAT, result.get("usage"))
 
     return {
         "answer": result["answer"],
         "tools_used": result["tools_used"],
         "response_time": response_time,
+        "usage": usage_service.chat_usage(user),
     }
 
 

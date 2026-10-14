@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from expenses.models import Receipt
 from expenses.serializers.expense_serializers import CategorySerializer, ExpenseSerializer
 from expenses.serializers.receipt_serializers import ProcessedReceiptSerializer, ReceiptUploadSerializer
-from expenses.services import category_service, receipt_service
+from expenses.services import category_service, receipt_service, usage_service
 from expenses.views.api import ServiceAPIView
 
 
@@ -33,7 +33,8 @@ class ReceiptConfirmView(ServiceAPIView):
 @login_required
 def upload_page(request):
     categories = CategorySerializer(category_service.list_categories(), many=True).data
-    return render(request, "expenses/upload.html", {"categories": categories})
+    usage = usage_service.receipt_usage(request.user)
+    return render(request, "expenses/upload.html", {"categories": categories, "usage": usage})
 
 
 @login_required

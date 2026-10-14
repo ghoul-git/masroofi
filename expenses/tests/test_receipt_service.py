@@ -130,6 +130,9 @@ class ConfirmReceiptTests(TestCase):
         self.assertEqual(self.receipt.status, Receipt.Status.EXTRACTED)
 
 
+EXTRACTION_TOKENS = {"input_tokens": 120, "output_tokens": 45}
+
+
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class ProcessReceiptTests(TestCase):
     """The AI steps are mocked: these tests cover how process_receipt uses their results."""
@@ -143,7 +146,7 @@ class ProcessReceiptTests(TestCase):
     def run_with(self, ocr_result=("RAW TEXT", 0.9), extracted=None, extract_error=None):
         with mock.patch("expenses.ai.preprocessing.preprocess", return_value="image") as preprocess, \
                 mock.patch("expenses.ai.ocr.read_text", return_value=ocr_result), \
-                mock.patch("expenses.ai.extraction.extract_fields", return_value=extracted,
+                mock.patch("expenses.ai.extraction.extract_fields", return_value=(extracted, EXTRACTION_TOKENS),
                            side_effect=extract_error) as extract:
             result = receipt_service.process_receipt(self.user, self.image)
         return result, preprocess, extract

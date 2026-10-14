@@ -28,3 +28,4 @@ class ProcessedReceiptSerializer(serializers.Serializer):
     # Named "extracted" because "fields" would shadow Serializer.fields.
     extracted = serializers.DictField(source="fields")
     confidence = serializers.FloatField()
+    usage = serializers.DictField()

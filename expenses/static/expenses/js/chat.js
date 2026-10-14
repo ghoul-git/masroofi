@@ -52,11 +52,21 @@
         return responseTime == null ? tools : `${tools} · ${responseTime.toFixed(1)}s`;
     }
 
+    const usageLine = document.getElementById("usage");
+    const limitNotice = document.getElementById("limit-notice");
+    let limitReached = form.dataset.limitReached === "true";
+
     function setBusy(busy) {
         thinking.hidden = !busy;
-        sendButton.disabled = busy;
-        question.disabled = busy;
+        sendButton.disabled = busy || limitReached;
+        question.disabled = busy || limitReached;
         if (busy) scrollToBottom();
+    }
+
+    function updateUsage(usage) {
+        usageLine.textContent = usage.label;
+        limitReached = usage.limit_reached;
+        limitNotice.hidden = !limitReached;
     }
 
     async function loadHistory() {
@@ -85,12 +95,16 @@
         try {
             const result = await apiFetch("/api/chat/", { method: "POST", json: { question: text } });
             addMessage("assistant", result.answer, toolsLine(result.tools_used, result.response_time));
+            updateUsage(result.usage);
         } catch (error) {
             // The question was not saved, so put it back for another try.
             log.lastElementChild.remove();
             empty.hidden = log.querySelector(".message") !== null;
             question.value = text;
             showErrors(errors, error.messages || [String(error)]);
+            if (error.status === 429) {
+                limitReached = true;
+            }
         } finally {
             setBusy(false);
             question.focus();
@@ -105,5 +119,6 @@
         }
     });
 
+    setBusy(false);
     loadHistory();
 })();

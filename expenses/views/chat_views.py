@@ -4,7 +4,7 @@ from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
 
 from expenses.serializers.chat_serializers import ChatAnswerSerializer, ChatMessageSerializer
-from expenses.services import chat_service
+from expenses.services import chat_service, usage_service
 from expenses.views.api import ServiceAPIView
 
 
@@ -25,4 +25,4 @@ class ChatHistoryView(ServiceAPIView):
 
 @login_required
 def chat_page(request):
-    return render(request, "expenses/chat.html")
+    return render(request, "expenses/chat.html", {"usage": usage_service.chat_usage(request.user)})

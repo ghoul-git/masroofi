@@ -16,3 +16,4 @@ class ChatAnswerSerializer(serializers.Serializer):
     answer = serializers.CharField()
     tools_used = serializers.ListField(child=serializers.DictField())
     response_time = serializers.FloatField()
+    usage = serializers.DictField()

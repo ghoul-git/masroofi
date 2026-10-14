@@ -21,16 +21,43 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+def env_bool(name, default):
+    value = os.getenv(name)
+    return default if value is None or value.strip() == "" else value.strip() == "True"
+
+
+def env_int(name, default):
+    value = os.getenv(name)
+    return default if value is None or value.strip() == "" else int(value)
+
+
+def env_list(name):
+    """A comma-separated variable as a list, ignoring blanks: "a.com, b.com" -> ["a.com", "b.com"]."""
+    return [item.strip() for item in os.getenv(name, "").split(",") if item.strip()]
+
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ["SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "False") == "True"
+DEBUG = env_bool("DEBUG", False)
 
-ALLOWED_HOSTS = []
+# With DEBUG on and no hosts listed, Django allows localhost only.
+ALLOWED_HOSTS = env_list("ALLOWED_HOSTS")
+# Full origins with scheme, such as https://masroofi.example.com
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
+
+if not DEBUG:
+    # HTTPS only. SECURE_PROXY_SSL_HEADER trusts X-Forwarded-Proto, which is only safe
+    # behind a proxy (nginx, a hosting platform) that always sets or strips that header.
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", True)
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 3600)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"
 
 
 # Application definition
@@ -48,6 +75,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Serves the files collected into STATIC_ROOT; must come right after SecurityMiddleware.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -128,6 +157,19 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+# `python manage.py collectstatic` copies every static file here; WhiteNoise serves them.
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    # In production, file names get a content hash so browsers can cache them forever,
+    # and files are pre-compressed. This needs collectstatic to have been run.
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        if DEBUG
+        else "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -135,6 +177,32 @@ MEDIA_ROOT = BASE_DIR / "media"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "home"
 LOGOUT_REDIRECT_URL = "login"
+
+
+# Logging: errors (including unhandled exceptions behind a 500 page) go to the
+# console with a timestamp, where hosting platforms collect them.
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "timestamped": {"format": "{asctime} {levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "timestamped", "level": "ERROR"},
+    },
+    "root": {"handlers": ["console"], "level": "ERROR"},
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}
+
+
+# AI usage limits. Staff users are exempt from the per-user limits but not the global one.
+
+FREE_RECEIPTS_PER_MONTH = env_int("FREE_RECEIPTS_PER_MONTH", 30)
+FREE_CHAT_PER_DAY = env_int("FREE_CHAT_PER_DAY", 20)
+GLOBAL_DAILY_AI_CALLS = env_int("GLOBAL_DAILY_AI_CALLS", 500)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

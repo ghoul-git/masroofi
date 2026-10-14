@@ -9,6 +9,7 @@
 <div class="card">
     <h1 style="margin-top: 0;">Ask Masroofi</h1>
     <p class="muted" style="margin-top: 0;">Ask about your spending, in Arabic or English. For example: "How much did I spend on food this month?"</p>
+    <p class="muted" id="usage">{{ usage.label }}</p>
 
     <div id="chat-log" class="chat-log" aria-live="polite">
         <p id="history-loading" class="muted"><span class="spinner"></span>Loading conversation...</p>
@@ -18,7 +19,10 @@
     <p id="thinking" class="muted" hidden><span class="spinner"></span>Masroofi is thinking...</p>
     <ul class="errors" id="chat-errors" hidden></ul>
 
-    <form id="chat-form" class="chat-form">
+    <p class="notice" id="limit-notice"{% if not usage.limit_reached %} hidden{% endif %}>
+        You have reached today's question limit. You can ask more tomorrow.
+    </p>
+    <form id="chat-form" class="chat-form" data-limit-reached="{{ usage.limit_reached|yesno:'true,false' }}">
         <textarea id="question" rows="1" maxlength="1000" dir="auto" placeholder="Ask about your expenses" required></textarea>
         <button type="submit" class="button" id="send-button">Send</button>
     </form>

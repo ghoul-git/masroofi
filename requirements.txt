@@ -23,8 +23,8 @@ openai==3.28.0
 opencv-python-headless==5.0.0.93
 packaging==26.3
 pillow==12.3.0
-psycopg==3.3.6
 psycopg-binary==3.3.6
+psycopg==3.3.6
 pyclipper==1.4.0
 pydantic==2.14.0
 pydantic_core==2.50.0
@@ -44,3 +44,4 @@ truststore==0.10.4
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 tzdata==2026.5
+whitenoise==6.12.0
