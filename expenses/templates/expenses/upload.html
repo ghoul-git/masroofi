@@ -31,17 +31,17 @@
     </p>
 
     <div class="grid">
-        <div>
+        <div class="field">
             <label for="store-name">Store</label>
             <input type="text" id="store-name" maxlength="200" required>
         </div>
-        <div>
+        <div class="field">
             <label for="date">Date</label>
             <input type="date" id="date" required>
         </div>
         <div>
             <label for="total">Total</label>
-            <input type="number" id="total" min="0" step="0.01" required>
+            <input type="number" id="total" min="0" step="0.001" required>
         </div>
         <div>
             <label for="currency">Currency</label>
@@ -84,6 +84,7 @@
 
 <div id="saved" class="card" style="margin-top: 1.5rem;" hidden>
     <p class="notice success">Expense saved.</p>
+    <ul class="notice" id="saved-warnings" hidden></ul>
     <div class="actions">
         <a class="button" href="{% url 'expenses' %}">View expenses</a>
         <a class="button button-secondary" href="{% url 'upload' %}">Upload another</a>

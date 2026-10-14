@@ -4,14 +4,16 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.utils.dateparse import parse_date
 
-# Upper bounds that fit the DecimalField sizes on Expense.total and Item.quantity/price.
-MAX_AMOUNT = Decimal("99999999.99")
-MAX_QUANTITY = Decimal("999999.99")
+# Amounts are stored with 3 decimal places (DecimalField max_digits=12, decimal_places=3),
+# because the Jordanian dinar has 1000 fils. These are the largest values that fit.
+AMOUNT_PLACES = Decimal("0.001")
+MAX_AMOUNT = Decimal("999999999.999")
+MAX_QUANTITY = Decimal("999999999.999")
 DEFAULT_CURRENCY = "JOD"
 
 
 def parse_amount(value, max_value):
-    """Parse a non-negative amount with 2 decimal places, or raise ValueError."""
+    """Parse a non-negative amount, rounded to 3 decimal places, or raise ValueError."""
     if isinstance(value, bool) or value is None or value == "":
         raise ValueError
     try:
@@ -20,7 +22,7 @@ def parse_amount(value, max_value):
         raise ValueError
     if not number.is_finite():
         raise ValueError
-    number = number.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    number = number.quantize(AMOUNT_PLACES, rounding=ROUND_HALF_UP)
     if number < 0:
         raise ValueError("must not be negative")
     if number > max_value:

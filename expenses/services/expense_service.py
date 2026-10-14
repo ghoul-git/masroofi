@@ -3,6 +3,7 @@ from django.db import transaction
 
 from expenses.models import Expense
 from expenses.repositories import category_repository, expense_repository
+from expenses.services import review_checks
 from expenses.services.validation import (
     DEFAULT_CURRENCY,
     MAX_AMOUNT,
@@ -134,3 +135,8 @@ def update_expense(user, expense_id, data) -> Expense:
 def delete_expense(user, expense_id) -> None:
     if not expense_repository.delete(user, expense_id):
         raise Expense.DoesNotExist("Expense not found.")
+
+
+def expense_warnings(expense) -> dict:
+    """{field: message} for fields to double-check on a saved expense. Never blocks saving."""
+    return review_checks.expense_warnings(expense.store_name, expense.date)

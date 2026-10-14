@@ -80,5 +80,38 @@
         select.value = selectedId != null ? String(selectedId) : "";
     }
 
-    window.Masroofi = { apiFetch, ApiError, showErrors, categoryOptions };
+    // Currencies with 3 minor-unit digits (ISO 4217); the Jordanian dinar has 1000 fils.
+    const THREE_DECIMAL_CURRENCIES = new Set(["JOD", "KWD", "BHD", "OMR", "IQD", "LYD", "TND"]);
+
+    // "12.5" + "JOD" -> "12.500", "12.5" + "USD" -> "12.50". Amounts arrive as decimal strings.
+    function formatAmount(value, currency) {
+        const number = Number(value);
+        if (value === null || value === "" || Number.isNaN(number)) return "";
+        const digits = THREE_DECIMAL_CURRENCIES.has(String(currency).toUpperCase()) ? 3 : 2;
+        return number.toFixed(digits);
+    }
+
+    // Highlight a field in amber with a message under it, e.g. "Please check this date".
+    // The highlight goes away as soon as the user changes the value.
+    function flagField(input, message) {
+        const wrapper = input.closest(".field") || input.parentElement;
+        let note = wrapper.querySelector(".field-warning");
+        if (!note) {
+            note = document.createElement("p");
+            note.className = "field-warning";
+            wrapper.appendChild(note);
+        }
+        note.textContent = message;
+        note.hidden = false;
+        input.classList.add("needs-check");
+        input.addEventListener("input", () => clearFlag(input), { once: true });
+    }
+
+    function clearFlag(input) {
+        input.classList.remove("needs-check");
+        const note = (input.closest(".field") || input.parentElement).querySelector(".field-warning");
+        if (note) note.hidden = true;
+    }
+
+    window.Masroofi = { apiFetch, ApiError, showErrors, categoryOptions, formatAmount, flagField, clearFlag };
 })();

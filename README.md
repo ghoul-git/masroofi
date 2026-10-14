@@ -32,7 +32,8 @@ receipt photo
 
 - **Preprocessing before OCR.** Phone photos of receipts are often blurry, unevenly lit and low contrast. Cleaning the image first makes OCR noticeably more accurate.
 - **OCR and an LLM together.** OCR gives the raw text, but receipts have no fixed layout. An LLM is good at understanding messy, mixed-language text and mapping it to fields, which hand-written rules cannot do for every shop.
-- **A human review step.** OCR and LLMs make mistakes. Because the user confirms every value before it is saved, a wrong reading never silently becomes wrong data. If reading fails completely, the user can still type the fields in the same form.
+- **A human review step.** OCR and LLMs make mistakes. Because the user confirms every value before it is saved, a wrong reading never silently becomes wrong data. If reading fails completely, the user can still type the fields in the same form. Values that are often wrong are highlighted in amber with a note: a date in the future or more than a year ago ("Please check this date"), and a bill-payment platform such as eFAWATEERcom given as the store instead of the company paid. These are warnings only; saving is never blocked.
+- **Jordanian receipts.** Amounts are stored and shown with 3 decimal places, because the dinar has 1000 fils. The extraction prompt tells the model today's date and that dates are written day/month/year. On payment-platform receipts the store is the biller (Biller / مزود الخدمة); if the model still returns the platform, the app looks for the biller in the OCR text and otherwise flags the store for review.
 - **An agent with tools instead of free-form answers.** The chat model never sees the database directly and never computes totals itself. It calls tools that run exact SQL aggregations, and those tools only ever query the logged-in user's data, so answers are both correct and private. "Today" is the current date in Jordan (`TIME_ZONE = "Asia/Amman"`), so questions like "this month" match the user's calendar rather than UTC.
 
 The project combines three areas of AI: **computer vision** (OpenCV image preprocessing and EasyOCR text recognition), **natural language processing** (LLM extraction of structured fields from noisy OCR text in Arabic and English), and **agentic AI** (a tool-calling agent that decides which database queries to run to answer a question).
@@ -106,7 +107,8 @@ masroofi/
     │   ├── chat_service.py         ask() with the last 10 messages as history, get_history()
     │   ├── category_service.py     Category list for the dropdowns
     │   ├── user_service.py         User registration: email format, duplicate usernames
-    │   ├── validation.py           Amount and date parsing and limits, shared by the expense and receipt services
+    │   ├── validation.py           Amount (3 decimals) and date parsing and limits, shared by the expense and receipt services
+    │   ├── review_checks.py        Warnings for values to double-check: unusual dates, payment platforms as store
     │   ├── usage_service.py        Usage limits (checked before any AI call), usage recording, "12 of 30" labels
     │   ├── consent_service.py      The three required consents, recording them, checking the current versions
     │   ├── account_service.py      Data export (JSON) and password-confirmed account deletion
@@ -320,6 +322,7 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | `GLOBAL_DAILY_AI_CALLS` | No (defaults to `500`) | Receipts processed plus questions answered per day for all users together, staff included. Caps the daily OpenAI cost. |
 | `TERMS_VERSION` | No (defaults to `1.0`) | Current version of the Terms of Service. Change it when the terms change: every user must accept again on `/consent/` before using the app. |
 | `PRIVACY_VERSION` | No (defaults to `1.0`) | Current version of the Privacy Policy. Change it when the policy changes: every user must accept again. |
+| `PAYMENT_PLATFORMS` | No (defaults to eFAWATEERcom, Madfoatcom, CliQ and their Arabic names) | Comma-separated names of bill-payment platforms. On their receipts the store is the biller, not the platform. Setting this replaces the default list. |
 
 ## API Endpoints
 
@@ -329,9 +332,9 @@ The two endpoints that call OpenAI check the usage limits first. When a limit is
 
 | Method | URL | Description |
 |---|---|---|
-| `POST` | `/api/receipts/` | Upload a receipt image (`multipart/form-data`, field `image`, max 10 MB). Runs preprocessing, OCR and extraction, and returns the receipt with its status, the extracted fields and `usage`. If reading fails, the status is `failed` and the fields are empty so they can be filled in by hand. |
+| `POST` | `/api/receipts/` | Upload a receipt image (`multipart/form-data`, field `image`, max 10 MB). Runs preprocessing, OCR and extraction, and returns the receipt with its status, the extracted fields, `usage`, and `warnings` (`{field: message}` for values to double-check). If reading fails, the status is `failed` and the fields are empty so they can be filled in by hand. |
 | `POST` | `/api/receipts/<id>/confirm/` | Save the reviewed fields (`store_name`, `date`, `total`, `currency`, `category`, `items`) as an expense and mark the receipt `confirmed`. Returns `400` with a message per invalid field. |
-| `GET` | `/api/expenses/` | List your expenses, newest first, with their items, 20 per page. Returns `{"count", "next", "previous", "results"}`; use `?page=2` and so on for later pages. A page past the end returns `404`. |
+| `GET` | `/api/expenses/` | List your expenses, newest first, with their items and `warnings`, 20 per page. Returns `{"count", "next", "previous", "results"}`; use `?page=2` and so on for later pages. A page past the end returns `404`. |
 | `PATCH` | `/api/expenses/<id>/` | Update some fields of one of your expenses. Sending `items` replaces all items. |
 | `DELETE` | `/api/expenses/<id>/` | Delete one of your expenses. |
 | `POST` | `/api/chat/` | Ask a question (`{"question": "..."}`, max 1,000 characters). Returns the answer, the tools the agent used, the response time in seconds and `usage`. Returns `503` if the OpenAI API fails; a failed question does not count towards the limit. |
@@ -357,5 +360,6 @@ Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/im
 - **Deletion limits.** Deleting an account removes the data from the database and the receipt images from disk, but not from database backups, and not text already sent to OpenAI, which keeps it according to its own retention policy. Empty `media/receipts/<user id>/` folders are left behind.
 - **The data download has no images.** The JSON includes the text read from each receipt and the image file name, but not the image files themselves.
 - **Short chat memory.** The assistant only sees the last 10 messages of the conversation.
+- **Review checks are simple rules.** The biller is found only when the OCR text has a label such as "Biller" or "مزود الخدمة" next to it, and a new payment platform must be added to `PAYMENT_PLATFORMS` before it is recognised. A date that is wrong but within the last year is not flagged.
 - **Item editing is limited.** Items can be edited on the review form before saving, but the expenses page only edits the main fields. The API supports replacing items.
 - **No pagination on chat history.** The chat page loads the whole conversation at once.

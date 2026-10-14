@@ -1,6 +1,9 @@
 import json
 import os
 
+from django.conf import settings
+from django.utils import timezone
+
 from expenses.ai.client import get_client
 from expenses.ai.prompts import load_prompt
 
@@ -14,7 +17,12 @@ def extract_fields(raw_text: str, categories: list[str]) -> tuple[dict, dict]:
         model=os.environ["OPENAI_MODEL"],
         response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": load_prompt("receipt_extraction", categories=", ".join(categories))},
+            {"role": "system", "content": load_prompt(
+                "receipt_extraction",
+                categories=", ".join(categories),
+                today=timezone.localdate().isoformat(),
+                payment_platforms=", ".join(settings.PAYMENT_PLATFORMS),
+            )},
             {"role": "user", "content": raw_text},
         ],
     )

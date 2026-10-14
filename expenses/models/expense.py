@@ -9,7 +9,8 @@ class Expense(models.Model):
     category = models.ForeignKey("expenses.Category", on_delete=models.PROTECT, related_name="expenses")
     store_name = models.CharField(max_length=200)
     date = models.DateField()
-    total = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    # 3 decimal places: the Jordanian dinar has 1000 fils.
+    total = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(0)])
     currency = models.CharField(max_length=3, default="JOD")
     created_at = models.DateTimeField(auto_now_add=True)
 

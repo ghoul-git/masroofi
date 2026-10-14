@@ -7,6 +7,7 @@ from unittest import mock
 
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 
 from expenses.ai import agent, client, extraction
 from expenses.ai.prompts import PROMPTS_DIR, load_prompt
@@ -21,10 +22,10 @@ class LoadPromptTests(SimpleTestCase):
 
     def test_values_are_filled_in(self):
         self.assertIn("Today's date is 2026-10-14.", load_prompt("chat_agent", today="2026-10-14"))
-        self.assertIn("exactly one of: Food, Bills", load_prompt("receipt_extraction", categories="Food, Bills"))
+        self.assertIn("exactly one of: Food, Bills", load_prompt("receipt_extraction", categories="Food, Bills", today="2026-10-14", payment_platforms="CliQ"))
 
     def test_no_placeholder_is_left_unfilled(self):
-        for text in [load_prompt("chat_agent", today="X"), load_prompt("receipt_extraction", categories="X")]:
+        for text in [load_prompt("chat_agent", today="X"), load_prompt("receipt_extraction", categories="X", today="X", payment_platforms="X")]:
             self.assertNotRegex(text, r"\{\w+\}")
             self.assertNotIn("CATEGORY_LIST", text)
 
@@ -63,7 +64,12 @@ class SharedClientTests(SimpleTestCase):
         self.assertEqual(result, {"store_name": "Cozmo"})
         self.assertEqual(usage, {"input_tokens": 310, "output_tokens": 42})
         messages = create.call_args.kwargs["messages"]
-        self.assertEqual(messages[0]["content"], load_prompt("receipt_extraction", categories="Bills, Food"))
+        self.assertEqual(messages[0]["content"], load_prompt(
+            "receipt_extraction",
+            categories="Bills, Food",
+            today=timezone.localdate().isoformat(),
+            payment_platforms=", ".join(settings.PAYMENT_PLATFORMS),
+        ))
         self.assertEqual(messages[1], {"role": "user", "content": "RAW"})
 
 

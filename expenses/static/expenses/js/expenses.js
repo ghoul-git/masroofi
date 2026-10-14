@@ -1,9 +1,10 @@
 (function () {
-    const { apiFetch, showErrors, categoryOptions } = window.Masroofi;
+    const { apiFetch, showErrors, categoryOptions, formatAmount } = window.Masroofi;
     const categories = JSON.parse(document.getElementById("categories-data").textContent);
 
     const body = document.getElementById("expenses-body");
     const pageErrors = document.getElementById("page-errors");
+    const pageWarnings = document.getElementById("page-warnings");
     const loading = document.getElementById("loading");
     const empty = document.getElementById("empty");
     const tableWrap = document.getElementById("table-wrap");
@@ -19,6 +20,16 @@
         const td = document.createElement("td");
         td.textContent = text;
         if (className) td.className = className;
+        return td;
+    }
+
+    // A cell highlighted in amber, with the reason as a tooltip, when the server flagged the value.
+    function flaggedCell(text, warning) {
+        const td = cell(text);
+        if (warning) {
+            td.classList.add("needs-check");
+            td.title = warning;
+        }
         return td;
     }
 
@@ -60,11 +71,11 @@
         const row = document.createElement("tr");
         row.dataset.id = expense.id;
         row.append(
-            cell(expense.date),
-            cell(expense.store_name),
+            flaggedCell(expense.date, expense.warnings?.date),
+            flaggedCell(expense.store_name, expense.warnings?.store_name),
             cell(expense.category_name),
             cell(String(expense.items.length), "number"),
-            cell(expense.total, "number"),
+            cell(formatAmount(expense.total, expense.currency), "number"),
             cell(expense.currency),
             actionsCell(
                 button("Edit", "button-secondary", () => row.replaceWith(renderEditRow(expense))),
@@ -82,7 +93,7 @@
         const category = document.createElement("select");
         categoryOptions(category, categories, expense.category);
         categoryCell.appendChild(category);
-        const [totalCell, total] = input("number", expense.total, { min: "0", step: "0.01" });
+        const [totalCell, total] = input("number", expense.total, { min: "0", step: "0.001" });
         total.style.textAlign = "right";
         const [currencyCell, currency] = input("text", expense.currency, { maxLength: 3, size: 4 });
 
@@ -101,6 +112,8 @@
                     },
                 });
                 row.replaceWith(renderRow(updated));
+                // Saved; just point out anything that still looks unusual.
+                showErrors(pageWarnings, Object.values(updated.warnings || {}).map((w) => `${updated.store_name}: ${w}`));
             } catch (error) {
                 showErrors(pageErrors, error.messages || [String(error)]);
                 save.disabled = false;
@@ -124,7 +137,7 @@
 
     function renderDeleteRow(expense) {
         const row = document.createElement("tr");
-        const message = cell(`Delete the ${expense.total} ${expense.currency} expense at ${expense.store_name} on ${expense.date}?`);
+        const message = cell(`Delete the ${formatAmount(expense.total, expense.currency)} ${expense.currency} expense at ${expense.store_name} on ${expense.date}?`);
         message.colSpan = 6;
 
         const confirm = button("Yes, delete", "button-danger", async () => {

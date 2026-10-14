@@ -206,6 +206,18 @@ FREE_RECEIPTS_PER_MONTH = env_int("FREE_RECEIPTS_PER_MONTH", 30)
 FREE_CHAT_PER_DAY = env_int("FREE_CHAT_PER_DAY", 20)
 GLOBAL_DAILY_AI_CALLS = env_int("GLOBAL_DAILY_AI_CALLS", 500)
 
+
+# Bill-payment platforms. On their receipts the store is the biller (the company paid),
+# not the platform; see expenses.services.review_checks. Comma-separated in .env.
+
+PAYMENT_PLATFORMS = env_list("PAYMENT_PLATFORMS") or [
+    "eFAWATEERcom",
+    "Madfoatcom",
+    "CliQ",
+    "إي فواتيركم",
+    "مدفوعاتكم",
+]
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

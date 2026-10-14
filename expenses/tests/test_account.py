@@ -62,8 +62,8 @@ class ExportTests(UserDataMixin, TestCase):
         self.assertEqual(data["profile"]["username"], "alice")
         self.assertEqual(set(data["profile"]), {"username", "email", "date_joined"})
         [expense] = data["expenses"]
-        self.assertEqual((expense["store_name"], expense["total"], expense["category"]), ("Alice Market", "12.50", "Food"))
-        self.assertEqual(expense["items"], [{"name": "Bread", "quantity": "1.00", "price": "1.50"}])
+        self.assertEqual((expense["store_name"], expense["total"], expense["category"]), ("Alice Market", "12.500", "Food"))
+        self.assertEqual(expense["items"], [{"name": "Bread", "quantity": "1.000", "price": "1.500"}])
         self.assertEqual([r["raw_text"] for r in data["receipts"]], ["Alice Market receipt text"])
         self.assertEqual([m["content"] for m in data["chat_messages"]], ["Alice Market: كم صرفت؟", "12.50 JOD"])
         self.assertEqual(data["chat_messages"][1]["tools_used"], [{"name": "get_spending_total", "arguments": {}}])

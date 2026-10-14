@@ -29,3 +29,4 @@ class ProcessedReceiptSerializer(serializers.Serializer):
     extracted = serializers.DictField(source="fields")
     confidence = serializers.FloatField()
     usage = serializers.DictField()
+    warnings = serializers.DictField()

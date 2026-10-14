@@ -60,7 +60,7 @@ class AskTests(TestCase):
         self.assertEqual(tool_output["type"], "function_call_output")
         self.assertEqual(tool_output["call_id"], "call_42")
         output = json.loads(tool_output["output"])
-        self.assertEqual(output["totals"], [{"currency": "JOD", "total": "12.50", "count": 1}])
+        self.assertEqual(output["totals"], [{"currency": "JOD", "total": "12.500", "count": 1}])
 
     def test_sends_the_last_10_messages_as_history(self):
         for i in range(12):

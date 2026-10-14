@@ -6,7 +6,7 @@ from django.db import transaction
 
 from expenses.models import AIUsage, Expense, Receipt
 from expenses.repositories import category_repository, expense_repository, receipt_repository
-from expenses.services import usage_service
+from expenses.services import review_checks, usage_service
 from expenses.services.expense_service import clean_expense_data
 from expenses.services.validation import (
     DEFAULT_CURRENCY,
@@ -25,6 +25,7 @@ class ProcessedReceipt:
     fields: dict = field(default_factory=dict)
     confidence: float = 0.0
     usage: dict = field(default_factory=dict)  # usage_service.receipt_usage after this receipt
+    warnings: dict = field(default_factory=dict)  # {field: message} to show on the review form
 
 
 def _empty_fields() -> dict:
@@ -84,6 +85,21 @@ def _normalize_fields(extracted) -> dict:
     return fields
 
 
+def _review(fields: dict, raw_text: str) -> dict:
+    """Fix or flag fields that are often wrong. Changes fields in place and returns {field: message}."""
+    warnings = {}
+    if review_checks.is_payment_platform(fields["store_name"]):
+        # The model returned the platform (e.g. eFAWATEERcom) instead of the company paid.
+        biller = review_checks.find_biller(raw_text)
+        if biller:
+            fields["store_name"] = biller
+        else:
+            warnings["store_name"] = review_checks.STORE_MESSAGE
+    if review_checks.date_warning(parse_date_value(fields["date"])):
+        warnings["date"] = review_checks.DATE_MESSAGE
+    return warnings
+
+
 def process_receipt(user, image_file) -> ProcessedReceipt:
     """Save the image, read it with OCR and extract the receipt fields.
 
@@ -103,7 +119,7 @@ def process_receipt(user, image_file) -> ProcessedReceipt:
     from expenses.ai.preprocessing import preprocess
 
     receipt = receipt_repository.create(user, image_file)
-    raw_text, confidence, fields, tokens = "", 0.0, _empty_fields(), None
+    raw_text, confidence, fields, tokens, warnings = "", 0.0, _empty_fields(), None, {}
 
     try:
         image = preprocess(receipt.image.path)
@@ -112,6 +128,7 @@ def process_receipt(user, image_file) -> ProcessedReceipt:
             raise ValueError("OCR found no text in the image.")
         extracted, tokens = extract_fields(raw_text, category_repository.list_names())
         fields = _normalize_fields(extracted)
+        warnings = _review(fields, raw_text)
         status = Receipt.Status.EXTRACTED
     except Exception:
         logger.exception("Processing failed for receipt %s", receipt.pk)
@@ -120,7 +137,10 @@ def process_receipt(user, image_file) -> ProcessedReceipt:
     usage_service.record(user, AIUsage.Kind.RECEIPT, tokens)
     receipt_repository.update(user, receipt.pk, raw_text=raw_text, status=status)
     receipt = receipt_repository.get(user, receipt.pk)
-    return ProcessedReceipt(receipt=receipt, fields=fields, confidence=confidence, usage=usage_service.receipt_usage(user))
+    return ProcessedReceipt(
+        receipt=receipt, fields=fields, confidence=confidence,
+        usage=usage_service.receipt_usage(user), warnings=warnings,
+    )
 
 
 def get_receipt(user, receipt_id) -> Receipt:

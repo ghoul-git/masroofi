@@ -207,3 +207,17 @@ label.checkbox input { margin-top: 0.2rem; flex-shrink: 0; }
     font-size: 0.9rem;
 }
 .site-footer a { color: #52606d; }
+
+/* Values flagged for review ("Please check this date"): amber, never blocking */
+.needs-check,
+input.needs-check {
+    background: #fef3c7;
+    border-color: #d97706;
+}
+td.needs-check { box-shadow: inset 3px 0 0 #d97706; }
+.field-warning {
+    color: #92400e;
+    font-size: 0.9rem;
+    margin: -0.75rem 0 1rem;
+}
+ul.notice { padding-left: 2rem; }

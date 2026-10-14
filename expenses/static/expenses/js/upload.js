@@ -1,5 +1,5 @@
 (function () {
-    const { apiFetch, showErrors, categoryOptions } = window.Masroofi;
+    const { apiFetch, showErrors, categoryOptions, flagField, clearFlag } = window.Masroofi;
     const categories = JSON.parse(document.getElementById("categories-data").textContent);
 
     const uploadForm = document.getElementById("upload-form");
@@ -41,8 +41,8 @@
         const row = document.createElement("tr");
         row.append(
             cellInput("text", item.name, { className: "item-name", maxLength: 200, placeholder: "Item name" }),
-            cellInput("number", item.quantity ?? "1", { className: "item-quantity", min: "0", step: "0.01" }),
-            cellInput("number", item.price, { className: "item-price", min: "0", step: "0.01" })
+            cellInput("number", item.quantity ?? "1", { className: "item-quantity", min: "0", step: "0.001" }),
+            cellInput("number", item.price, { className: "item-price", min: "0", step: "0.001" })
         );
         const removeCell = document.createElement("td");
         const remove = document.createElement("button");
@@ -78,6 +78,12 @@
 
         uploadForm.closest(".card").hidden = true;
         reviewForm.hidden = false;
+        // Fields the server flagged for a second look, e.g. a date a year ago or a payment platform as store.
+        const flagged = { store_name: field("store-name"), date: field("date") };
+        Object.values(flagged).forEach(clearFlag);
+        for (const [name, message] of Object.entries(result.warnings || {})) {
+            if (flagged[name]) flagField(flagged[name], message);
+        }
         field("store-name").focus();
     }
 
@@ -135,7 +141,9 @@
         saveButton.disabled = true;
         saveButton.textContent = "Saving...";
         try {
-            await apiFetch(`/api/receipts/${receiptId}/confirm/`, { method: "POST", json: collectReviewData() });
+            const expense = await apiFetch(`/api/receipts/${receiptId}/confirm/`, { method: "POST", json: collectReviewData() });
+            // Saved either way; remind the user of anything that still looks unusual.
+            showErrors(document.getElementById("saved-warnings"), Object.values(expense.warnings || {}));
             reviewForm.hidden = true;
             saved.hidden = false;
         } catch (error) {

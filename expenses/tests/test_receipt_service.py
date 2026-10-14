@@ -78,7 +78,7 @@ class ConfirmReceiptTests(TestCase):
                 self.assert_rejected(self.valid_data(total=total), "total")
 
     def test_total_too_large_for_the_column_is_rejected(self):
-        self.assert_rejected(self.valid_data(total="100000000"), "total")
+        self.assert_rejected(self.valid_data(total="1000000000"), "total")
 
     def test_invalid_date_is_rejected(self):
         for date in ["2026-02-30", "05/10/2026", "not a date", "", None]:
@@ -169,10 +169,10 @@ class ProcessReceiptTests(TestCase):
         self.assertEqual(result.fields, {
             "store_name": "Carrefour",
             "date": "2026-10-05",
-            "total": "12.50",
+            "total": "12.500",
             "currency": "JOD",
             "category": self.food.pk,
-            "items": [{"name": "Milk", "quantity": "2.00", "price": "1.25"}],
+            "items": [{"name": "Milk", "quantity": "2.000", "price": "1.250"}],
         })
 
     def test_invalid_model_output_is_dropped(self):

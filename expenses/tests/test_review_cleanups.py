@@ -25,8 +25,8 @@ class ValidationModuleTests(SimpleTestCase):
         self.assertEqual(expense_service.parse_amount.__module__, "expenses.services.validation")
 
     def test_parse_amount(self):
-        self.assertEqual(validation.parse_amount("12.345", validation.MAX_AMOUNT), Decimal("12.35"))
-        for bad in ["-1", "abc", "", None, True, "NaN", "100000000"]:
+        self.assertEqual(validation.parse_amount("12.3455", validation.MAX_AMOUNT), Decimal("12.346"))
+        for bad in ["-1", "abc", "", None, True, "NaN", "1000000000"]:
             with self.subTest(value=bad), self.assertRaises(ValueError):
                 validation.parse_amount(bad, validation.MAX_AMOUNT)
 

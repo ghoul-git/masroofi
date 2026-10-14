@@ -21,35 +21,35 @@ class ToolFixtureMixin:
         make_category("bills")
 
         # Alice, September: food 20.00, transport 5.00
-        make_expense(self.alice, food, "Carrefour", "20.00", date="2026-09-10")
-        make_expense(self.alice, transport, "Careem", "5.00", date="2026-09-15")
+        make_expense(self.alice, food, "Carrefour", "20.000", date="2026-09-10")
+        make_expense(self.alice, transport, "Careem", "5.000", date="2026-09-15")
         # Alice, October: food 12.50 + 7.25 + 30.00 (USD), transport 4.00
-        make_expense(self.alice, food, "Carrefour", "12.50", date="2026-10-02")
-        make_expense(self.alice, food, "Cozmo", "7.25", date="2026-10-20")
-        make_expense(self.alice, transport, "Careem", "4.00", date="2026-10-31")
-        make_expense(self.alice, food, "Amazon", "30.00", date="2026-10-05", currency="USD")
+        make_expense(self.alice, food, "Carrefour", "12.500", date="2026-10-02")
+        make_expense(self.alice, food, "Cozmo", "7.250", date="2026-10-20")
+        make_expense(self.alice, transport, "Careem", "4.000", date="2026-10-31")
+        make_expense(self.alice, food, "Amazon", "30.000", date="2026-10-05", currency="USD")
         # Outside both periods
-        make_expense(self.alice, food, "Carrefour", "99.00", date="2026-11-01")
+        make_expense(self.alice, food, "Carrefour", "99.000", date="2026-11-01")
 
         # Bob, same dates, store names that must never show up for Alice
-        make_expense(self.bob, food, "Bob Market", "500.00", date="2026-10-03")
-        make_expense(self.bob, transport, "Bob Taxi", "300.00", date="2026-09-12")
-        make_expense(self.bob, food, "Bob Market", "70.00", date="2026-10-04", currency="USD")
+        make_expense(self.bob, food, "Bob Market", "500.000", date="2026-10-03")
+        make_expense(self.bob, transport, "Bob Taxi", "300.000", date="2026-09-12")
+        make_expense(self.bob, food, "Bob Market", "70.000", date="2026-10-04", currency="USD")
 
 
 class ToolTotalsTests(ToolFixtureMixin, TestCase):
     def test_get_spending_total(self):
         result = run_tool(self.alice, "get_spending_total", {**OCTOBER, "category": None})
         self.assertEqual(result["totals"], [
-            {"currency": "USD", "total": "30.00", "count": 1},
-            {"currency": "JOD", "total": "23.75", "count": 3},
+            {"currency": "USD", "total": "30.000", "count": 1},
+            {"currency": "JOD", "total": "23.750", "count": 3},
         ])
         self.assertEqual(result["expense_count"], 4)
 
     def test_get_spending_total_for_one_category_ignores_case(self):
         result = run_tool(self.alice, "get_spending_total", {**SEPTEMBER, "category": "FOOD"})
         self.assertEqual(result["category"], "Food")
-        self.assertEqual(result["totals"], [{"currency": "JOD", "total": "20.00", "count": 1}])
+        self.assertEqual(result["totals"], [{"currency": "JOD", "total": "20.000", "count": 1}])
 
     def test_get_spending_total_with_no_expenses(self):
         result = run_tool(self.alice, "get_spending_total", {"start_date": "2025-01-01", "end_date": "2025-01-31"})
@@ -58,14 +58,14 @@ class ToolTotalsTests(ToolFixtureMixin, TestCase):
 
     def test_dates_are_inclusive(self):
         result = run_tool(self.alice, "get_spending_total", {"start_date": "2026-10-31", "end_date": "2026-10-31"})
-        self.assertEqual(result["totals"], [{"currency": "JOD", "total": "4.00", "count": 1}])
+        self.assertEqual(result["totals"], [{"currency": "JOD", "total": "4.000", "count": 1}])
 
     def test_get_spending_by_category(self):
         result = run_tool(self.alice, "get_spending_by_category", OCTOBER)
         self.assertEqual(result["categories"], [
-            {"category": "Food", "currency": "USD", "total": "30.00", "count": 1},
-            {"category": "Food", "currency": "JOD", "total": "19.75", "count": 2},
-            {"category": "Transport", "currency": "JOD", "total": "4.00", "count": 1},
+            {"category": "Food", "currency": "USD", "total": "30.000", "count": 1},
+            {"category": "Food", "currency": "JOD", "total": "19.750", "count": 2},
+            {"category": "Transport", "currency": "JOD", "total": "4.000", "count": 1},
         ])
 
     def test_list_expenses(self):
@@ -77,7 +77,7 @@ class ToolTotalsTests(ToolFixtureMixin, TestCase):
             "date": "2026-10-31",
             "store_name": "Careem",
             "category": "Transport",
-            "total": "4.00",
+            "total": "4.000",
             "currency": "JOD",
         })
 
@@ -93,14 +93,14 @@ class ToolTotalsTests(ToolFixtureMixin, TestCase):
     def test_get_top_expenses(self):
         result = run_tool(self.alice, "get_top_expenses", {**OCTOBER, "limit": 2})
         self.assertEqual([(e["store_name"], e["total"]) for e in result["expenses"]], [
-            ("Amazon", "30.00"),
-            ("Carrefour", "12.50"),
+            ("Amazon", "30.000"),
+            ("Carrefour", "12.500"),
         ])
 
     def test_get_top_expenses_default_limit_is_5(self):
         result = run_tool(self.alice, "get_top_expenses", {"start_date": "2026-01-01", "end_date": "2026-12-31", "limit": None})
         self.assertEqual(len(result["expenses"]), 5)
-        self.assertEqual(result["expenses"][0]["total"], "99.00")
+        self.assertEqual(result["expenses"][0]["total"], "99.000")
 
     def test_compare_periods(self):
         result = run_tool(self.alice, "compare_periods", {
@@ -109,8 +109,8 @@ class ToolTotalsTests(ToolFixtureMixin, TestCase):
             "category": None,
         })
         self.assertEqual(result["comparison"], [
-            {"currency": "JOD", "first_total": "25.00", "second_total": "23.75", "change": "-1.25", "change_percent": -5.0},
-            {"currency": "USD", "first_total": "0.00", "second_total": "30.00", "change": "30.00", "change_percent": None},
+            {"currency": "JOD", "first_total": "25.000", "second_total": "23.750", "change": "-1.250", "change_percent": -5.0},
+            {"currency": "USD", "first_total": "0.000", "second_total": "30.000", "change": "30.000", "change_percent": None},
         ])
 
     def test_compare_periods_for_one_category(self):
@@ -120,7 +120,7 @@ class ToolTotalsTests(ToolFixtureMixin, TestCase):
             "category": "transport",
         })
         self.assertEqual(result["comparison"], [
-            {"currency": "JOD", "first_total": "5.00", "second_total": "4.00", "change": "-1.00", "change_percent": -20.0},
+            {"currency": "JOD", "first_total": "5.000", "second_total": "4.000", "change": "-1.000", "change_percent": -20.0},
         ])
 
     def test_results_are_json_serializable(self):
@@ -148,13 +148,13 @@ class ToolIsolationTests(ToolFixtureMixin, TestCase):
     def test_totals_never_include_another_user(self):
         result = run_tool(self.alice, "get_spending_total", self.WIDE)
         self.assertEqual(result["totals"], [
-            {"currency": "JOD", "total": "147.75", "count": 6},
-            {"currency": "USD", "total": "30.00", "count": 1},
+            {"currency": "JOD", "total": "147.750", "count": 6},
+            {"currency": "USD", "total": "30.000", "count": 1},
         ])
         bob = run_tool(self.bob, "get_spending_total", self.WIDE)
         self.assertEqual(bob["totals"], [
-            {"currency": "JOD", "total": "800.00", "count": 2},
-            {"currency": "USD", "total": "70.00", "count": 1},
+            {"currency": "JOD", "total": "800.000", "count": 2},
+            {"currency": "USD", "total": "70.000", "count": 1},
         ])
 
     def test_by_category_never_includes_another_user(self):
@@ -177,7 +177,7 @@ class ToolIsolationTests(ToolFixtureMixin, TestCase):
             "first_start": "2026-09-01", "first_end": "2026-09-30",
             "second_start": "2026-10-01", "second_end": "2026-10-31",
         })
-        self.assertEqual(result["comparison"][0]["first_total"], "25.00")
+        self.assertEqual(result["comparison"][0]["first_total"], "25.000")
 
     def test_user_cannot_be_passed_as_an_argument(self):
         for name, arguments in [

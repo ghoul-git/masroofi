@@ -8,6 +8,7 @@ import inspect
 from decimal import Decimal
 
 from expenses.repositories import category_repository, expense_repository
+from expenses.services.validation import AMOUNT_PLACES
 
 MAX_LIMIT = 50
 
@@ -59,7 +60,7 @@ def _limit(value, default) -> int:
 
 
 def _amount(value) -> str:
-    return str((value or Decimal("0")).quantize(Decimal("0.01")))
+    return str((value or Decimal("0")).quantize(AMOUNT_PLACES))
 
 
 def _totals(rows) -> list[dict]:
