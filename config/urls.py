@@ -1,9 +1,9 @@
-from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+# Uploaded receipt images are not served from MEDIA_URL: they are only
+# available to their owner through expenses.views.receipt_views.receipt_image.
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("", include("expenses.urls")),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+]

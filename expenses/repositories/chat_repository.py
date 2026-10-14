@@ -1,8 +1,8 @@
 from expenses.models import ChatMessage
 
 
-def create(user, role, content) -> ChatMessage:
-    return ChatMessage.objects.create(user=user, role=role, content=content)
+def create(user, role, content, tools_used=None) -> ChatMessage:
+    return ChatMessage.objects.create(user=user, role=role, content=content, tools_used=tools_used or [])
 
 
 def list_for_user(user):

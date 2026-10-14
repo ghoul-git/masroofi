@@ -7,6 +7,13 @@
     const loading = document.getElementById("loading");
     const empty = document.getElementById("empty");
     const tableWrap = document.getElementById("table-wrap");
+    const pagination = document.getElementById("pagination");
+    const previousButton = document.getElementById("previous-page");
+    const nextButton = document.getElementById("next-page");
+    const pageInfo = document.getElementById("page-info");
+
+    const PAGE_SIZE = 20; // matches ExpensePagination.page_size on the server
+    let currentPage = 1;
 
     function cell(text, className) {
         const td = document.createElement("td");
@@ -125,8 +132,10 @@
             showErrors(pageErrors, []);
             try {
                 await apiFetch(`/api/expenses/${expense.id}/`, { method: "DELETE" });
-                row.remove();
-                updateEmptyState();
+                // Reload so the next expense moves up into this page. If this was the
+                // only row on a later page, that page no longer exists: go back one.
+                const lastRowOnPage = body.children.length === 1;
+                await load(lastRowOnPage && currentPage > 1 ? currentPage - 1 : currentPage);
             } catch (error) {
                 showErrors(pageErrors, error.messages || [String(error)]);
                 confirm.disabled = false;
@@ -137,17 +146,38 @@
         return row;
     }
 
-    async function load() {
+    function updatePagination(data) {
+        const totalPages = Math.max(1, Math.ceil(data.count / PAGE_SIZE));
+        pagination.hidden = data.count <= PAGE_SIZE;
+        previousButton.disabled = !data.previous;
+        nextButton.disabled = !data.next;
+        pageInfo.textContent = `Page ${currentPage} of ${totalPages} · ${data.count} expenses`;
+    }
+
+    async function load(page = 1) {
+        previousButton.disabled = true;
+        nextButton.disabled = true;
         try {
-            const expenses = await apiFetch("/api/expenses/");
-            body.replaceChildren(...expenses.map(renderRow));
+            const data = await apiFetch(`/api/expenses/?page=${page}`);
+            currentPage = page;
+            body.replaceChildren(...data.results.map(renderRow));
             updateEmptyState();
+            updatePagination(data);
         } catch (error) {
             showErrors(pageErrors, error.messages || [String(error)]);
         } finally {
             loading.hidden = true;
         }
     }
+
+    previousButton.addEventListener("click", () => {
+        showErrors(pageErrors, []);
+        load(currentPage - 1);
+    });
+    nextButton.addEventListener("click", () => {
+        showErrors(pageErrors, []);
+        load(currentPage + 1);
+    });
 
     load();
 })();

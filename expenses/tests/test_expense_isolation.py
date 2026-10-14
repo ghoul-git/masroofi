@@ -60,7 +60,8 @@ class ExpenseApiIsolationTests(TestCase):
     def test_list_only_returns_own_expenses(self):
         response = self.client.get("/api/expenses/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([e["store_name"] for e in response.json()], ["Alice's shop"])
+        self.assertEqual([e["store_name"] for e in response.json()["results"]], ["Alice's shop"])
+        self.assertEqual(response.json()["count"], 1)
 
     def test_patch_another_users_expense_returns_404(self):
         response = self.client.patch(

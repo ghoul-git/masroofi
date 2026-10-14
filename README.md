@@ -33,7 +33,7 @@ receipt photo
 - **Preprocessing before OCR.** Phone photos of receipts are often blurry, unevenly lit and low contrast. Cleaning the image first makes OCR noticeably more accurate.
 - **OCR and an LLM together.** OCR gives the raw text, but receipts have no fixed layout. An LLM is good at understanding messy, mixed-language text and mapping it to fields, which hand-written rules cannot do for every shop.
 - **A human review step.** OCR and LLMs make mistakes. Because the user confirms every value before it is saved, a wrong reading never silently becomes wrong data. If reading fails completely, the user can still type the fields in the same form.
-- **An agent with tools instead of free-form answers.** The chat model never sees the database directly and never computes totals itself. It calls tools that run exact SQL aggregations, and those tools only ever query the logged-in user's data, so answers are both correct and private.
+- **An agent with tools instead of free-form answers.** The chat model never sees the database directly and never computes totals itself. It calls tools that run exact SQL aggregations, and those tools only ever query the logged-in user's data, so answers are both correct and private. "Today" is the current date in Jordan (`TIME_ZONE = "Asia/Amman"`), so questions like "this month" match the user's calendar rather than UTC.
 
 The project combines three areas of AI: **computer vision** (OpenCV image preprocessing and EasyOCR text recognition), **natural language processing** (LLM extraction of structured fields from noisy OCR text in Arabic and English), and **agentic AI** (a tool-calling agent that decides which database queries to run to answer a question).
 
@@ -71,28 +71,33 @@ masroofi/
 ├── .env.example                    Template for the environment variables (copy to .env)
 ├── config/                         Django project configuration
 │   ├── settings.py                 Settings, read from environment variables
-│   ├── urls.py                     Root URLs: admin, the expenses app, uploaded media
+│   ├── urls.py                     Root URLs: admin and the expenses app (uploaded images are not public)
 │   └── asgi.py, wsgi.py            Server entry points
 └── expenses/                       The application
     ├── models/                     Database tables, one file per model
     │   ├── user.py                 Custom user model (AUTH_USER_MODEL)
-    │   ├── category.py             Expense categories, shared by all users
-    │   ├── receipt.py              Uploaded image, OCR text and status (uploaded/extracted/confirmed/failed)
+    │   ├── category.py             Expense categories, shared by all users, names unique regardless of case
+    │   ├── receipt.py              Uploaded image (saved as receipts/<user id>/<random name>), OCR text and status
     │   ├── expense.py              A confirmed expense: store, date, total, currency, category
     │   ├── item.py                 Line items of an expense
-    │   └── chat_message.py         Saved chat questions and answers
+    │   └── chat_message.py         Saved chat questions and answers, with the tools used for each answer
     ├── ai/                         Computer vision, NLP and agent code
     │   ├── preprocessing.py        OpenCV: resize, grayscale, denoise, CLAHE contrast
     │   ├── ocr.py                  EasyOCR reader (Arabic + English), loaded once and reused
+    │   ├── client.py               Shared OpenAI client (30 s timeout, 2 retries) used by extraction and agent
+    │   ├── prompts/                System prompts as Markdown files, loaded with load_prompt(name, **values)
+    │   │   ├── receipt_extraction.md
+    │   │   └── chat_agent.md
     │   ├── extraction.py           LLM call that turns OCR text into structured JSON fields
     │   ├── tools.py                Database tools for the agent, their JSON schemas and run_tool()
     │   └── agent.py                Tool-calling loop on the OpenAI Responses API
     ├── services/                   Business logic
     │   ├── receipt_service.py      process_receipt() runs the AI pipeline, confirm_receipt() validates and saves
-    │   ├── expense_service.py      List, update and delete expenses, shared field validation
+    │   ├── expense_service.py      List, update and delete expenses, expense field validation
     │   ├── chat_service.py         ask() with the last 10 messages as history, get_history()
     │   ├── category_service.py     Category list for the dropdowns
-    │   ├── user_service.py         User registration
+    │   ├── user_service.py         User registration: email format, duplicate usernames
+    │   ├── validation.py           Amount and date parsing and limits, shared by the expense and receipt services
     │   └── exceptions.py           ServiceUnavailable, returned by the API as 503
     ├── repositories/               All database queries
     │   ├── receipt_repository.py
@@ -103,18 +108,20 @@ masroofi/
     ├── views/                      Thin HTTP layer
     │   ├── api.py                  Base API view: session login required, maps service errors to 400/404/503
     │   ├── auth_views.py           Register and home pages
-    │   ├── receipt_views.py        Upload page, receipt upload and confirm API
-    │   ├── expense_views.py        Expenses page, expense list/update/delete API
+    │   ├── receipt_views.py        Upload page, owner-only receipt image, receipt upload and confirm API
+    │   ├── expense_views.py        Expenses page, paginated expense list, update and delete API
     │   └── chat_views.py           Chat page, chat and history API
     ├── templates/                  HTML pages (base layout, login, register, home, upload, expenses, chat)
-    ├── static/expenses/js/         Plain JavaScript for the pages (api.js holds the shared fetch + CSRF helper)
-    ├── tests/                      Tests for the services, tools, API and per-user data isolation
-    ├── migrations/                 Database migrations (0002 creates the 7 default categories)
+    ├── static/expenses/
+    │   ├── css/main.css            Styles for every page
+    │   └── js/                     Plain JavaScript for the pages (api.js holds the shared fetch + CSRF helper)
+    ├── tests/                      Tests for the services, tools, agent, API, pagination and per-user data and image isolation
+    ├── migrations/                 Database migrations (0002 creates the 7 default categories as data)
     ├── admin.py                    Django admin registration
     └── urls.py                     Page and API routes
 ```
 
-Files created at run time and kept out of Git: `.env` (secrets), `.venv/` (virtual environment) and `media/` (uploaded receipt images).
+Files created at run time and kept out of Git: `.env` (secrets), `.venv/` (virtual environment) and `media/` (uploaded receipt images). Receipt images are never served from a public URL: `/receipts/<id>/image/` returns an image only to the user who uploaded it.
 
 ## 5. How to Run the Project
 
@@ -201,7 +208,7 @@ Open `.env` and fill in your own values (see [Environment Variables](#6-environm
 python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
 
-Keep `DEBUG=True` for local development. With `DEBUG=False`, Django rejects requests because `ALLOWED_HOSTS` is empty, and `runserver` stops serving the pages' JavaScript files.
+Keep `DEBUG=True` for local development. With `DEBUG=False`, Django rejects requests because `ALLOWED_HOSTS` is empty, and `runserver` stops serving the pages' CSS and JavaScript files.
 
 ### Step 6: Run the migrations
 
@@ -271,23 +278,25 @@ All endpoints return JSON, require a logged-in session (log in through `/login/`
 |---|---|---|
 | `POST` | `/api/receipts/` | Upload a receipt image (`multipart/form-data`, field `image`, max 10 MB). Runs preprocessing, OCR and extraction, and returns the receipt with its status and the extracted fields. If reading fails, the status is `failed` and the fields are empty so they can be filled in by hand. |
 | `POST` | `/api/receipts/<id>/confirm/` | Save the reviewed fields (`store_name`, `date`, `total`, `currency`, `category`, `items`) as an expense and mark the receipt `confirmed`. Returns `400` with a message per invalid field. |
-| `GET` | `/api/expenses/` | List your expenses, newest first, with their items. |
+| `GET` | `/api/expenses/` | List your expenses, newest first, with their items, 20 per page. Returns `{"count", "next", "previous", "results"}`; use `?page=2` and so on for later pages. A page past the end returns `404`. |
 | `PATCH` | `/api/expenses/<id>/` | Update some fields of one of your expenses. Sending `items` replaces all items. |
 | `DELETE` | `/api/expenses/<id>/` | Delete one of your expenses. |
 | `POST` | `/api/chat/` | Ask a question (`{"question": "..."}`, max 1,000 characters). Returns the answer, the tools the agent used, and the response time in seconds. Returns `503` if the OpenAI API fails. |
-| `GET` | `/api/chat/history/` | Your saved chat messages, oldest first. |
+| `GET` | `/api/chat/history/` | Your saved chat messages, oldest first. Assistant messages include `tools_used`. |
 
 Another user's receipt or expense id returns `404`, the same as an id that does not exist.
 
+Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/image/` returns the image file to its owner. A logged-out request is redirected to the login page, and anyone else gets `404`.
+
 ## Known Limitations
 
-- **Not production ready.** The settings are for local development: `ALLOWED_HOSTS` is empty, uploaded images are stored on the local disk in `media/`, and there is no rate limiting on the endpoints that call OpenAI.
+- **Not production ready.** The settings are for local development: `ALLOWED_HOSTS` is empty, uploaded images are stored on the local disk in `media/` (served only to their owner, through Django), and there is no rate limiting on the endpoints that call OpenAI.
 - **Receipt processing is synchronous.** The upload request waits for OCR and the LLM to finish, which can take up to a minute on CPU. There is no background job queue.
 - **OCR runs on the CPU.** EasyOCR is configured with `gpu=False`, so it works on any machine but is slow, and its first use needs internet access to download the models.
 - **Extraction is not always right.** Very blurry, crumpled or faded receipts can be misread or fail completely. The review step exists for this, but the user has to check the values.
 - **Depends on a paid external API.** Extraction and chat need an OpenAI API key and internet access, and each receipt and question costs API usage.
 - **No currency conversion.** Totals in different currencies are reported separately and never added together. "Top expenses" ranks by the raw amount regardless of currency.
 - **Categories are shared** by all users, and are managed by an administrator rather than by each user.
-- **Chat history is short and partly stored.** The assistant only sees the last 10 messages, and the list of tools used is shown for new answers but not saved, so it does not appear for older messages.
+- **Short chat memory.** The assistant only sees the last 10 messages of the conversation.
 - **Item editing is limited.** Items can be edited on the review form before saving, but the expenses page only edits the main fields. The API supports replacing items.
-- **No pagination** on the expenses list or chat history.
+- **No pagination on chat history.** The chat page loads the whole conversation at once.

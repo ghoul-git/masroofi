@@ -39,7 +39,7 @@ def ask(user, question) -> dict:
 
     with transaction.atomic():
         chat_repository.create(user, ChatMessage.Role.USER, question)
-        chat_repository.create(user, ChatMessage.Role.ASSISTANT, result["answer"])
+        chat_repository.create(user, ChatMessage.Role.ASSISTANT, result["answer"], tools_used=result["tools_used"])
 
     return {
         "answer": result["answer"],

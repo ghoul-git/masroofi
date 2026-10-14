@@ -6,11 +6,11 @@ from django.db import transaction
 
 from expenses.models import Expense, Receipt
 from expenses.repositories import category_repository, expense_repository, receipt_repository
-from expenses.services.expense_service import (
+from expenses.services.expense_service import clean_expense_data
+from expenses.services.validation import (
     DEFAULT_CURRENCY,
     MAX_AMOUNT,
     MAX_QUANTITY,
-    clean_expense_data,
     parse_amount,
     parse_date_value,
 )
@@ -111,6 +111,13 @@ def process_receipt(user, image_file) -> ProcessedReceipt:
     receipt_repository.update(user, receipt.pk, raw_text=raw_text, status=status)
     receipt = receipt_repository.get(user, receipt.pk)
     return ProcessedReceipt(receipt=receipt, fields=fields, confidence=confidence)
+
+
+def get_receipt(user, receipt_id) -> Receipt:
+    receipt = receipt_repository.get(user, receipt_id)
+    if receipt is None:
+        raise Receipt.DoesNotExist("Receipt not found.")
+    return receipt
 
 
 def confirm_receipt(user, receipt_id, data) -> Expense:

@@ -1,19 +1,13 @@
 import json
 import os
-from datetime import date
 
-from expenses.ai.extraction import get_client
+from django.utils import timezone
+
+from expenses.ai.client import get_client
+from expenses.ai.prompts import load_prompt
 from expenses.ai.tools import TOOL_SCHEMAS, run_tool
 
 MAX_STEPS = 5
-
-SYSTEM_PROMPT = """You are Masroofi, an assistant that answers questions about the user's own expenses.
-Today's date is {today}. The default currency is JOD.
-Rules:
-- Always call a tool to get numbers. Never guess and never answer from memory.
-- If the tools return no data, say so plainly.
-- Only answer questions about the user's expenses. Politely decline anything else.
-- Reply in the language the user wrote in. Keep answers short and state the exact amounts."""
 
 
 def answer(user, question: str, history: list[dict]) -> dict:
@@ -24,7 +18,7 @@ def answer(user, question: str, history: list[dict]) -> dict:
     for _ in range(MAX_STEPS):
         response = get_client().responses.create(
             model=os.environ["OPENAI_MODEL"],
-            instructions=SYSTEM_PROMPT.format(today=date.today().isoformat()),
+            instructions=load_prompt("chat_agent", today=timezone.localdate().isoformat()),
             input=input_items,
             tools=TOOL_SCHEMAS,
         )
@@ -34,9 +28,14 @@ def answer(user, question: str, history: list[dict]) -> dict:
 
         input_items += response.output
         for call in calls:
-            arguments = json.loads(call.arguments)
-            result = run_tool(user, call.name, arguments)
-            tools_used.append({"name": call.name, "arguments": arguments})
+            try:
+                arguments = json.loads(call.arguments)
+            except json.JSONDecodeError:
+                # Send the error back as the tool result so the model can retry the call.
+                result = {"error": "invalid JSON arguments"}
+            else:
+                result = run_tool(user, call.name, arguments)
+                tools_used.append({"name": call.name, "arguments": arguments})
             input_items.append({
                 "type": "function_call_output",
                 "call_id": call.call_id,

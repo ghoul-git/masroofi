@@ -33,6 +33,12 @@
             <tbody id="expenses-body"></tbody>
         </table>
     </div>
+
+    <nav class="pagination" id="pagination" aria-label="Expense pages" hidden>
+        <button type="button" class="button button-secondary button-small" id="previous-page">Previous</button>
+        <span class="muted" id="page-info"></span>
+        <button type="button" class="button button-secondary button-small" id="next-page">Next</button>
+    </nav>
 </div>
 
 {{ categories|json_script:"categories-data" }}

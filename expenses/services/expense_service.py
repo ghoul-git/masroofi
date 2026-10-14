@@ -1,48 +1,15 @@
-import datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.utils.dateparse import parse_date
 
 from expenses.models import Expense
 from expenses.repositories import category_repository, expense_repository
-
-# Upper bounds that fit the DecimalField sizes on Expense.total and Item.quantity/price.
-MAX_AMOUNT = Decimal("99999999.99")
-MAX_QUANTITY = Decimal("999999.99")
-DEFAULT_CURRENCY = "JOD"
-
-
-def parse_amount(value, max_value):
-    """Parse a non-negative amount with 2 decimal places, or raise ValueError."""
-    if isinstance(value, bool) or value is None or value == "":
-        raise ValueError
-    try:
-        number = Decimal(str(value).strip())
-    except InvalidOperation:
-        raise ValueError
-    if not number.is_finite():
-        raise ValueError
-    number = number.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    if number < 0:
-        raise ValueError("must not be negative")
-    if number > max_value:
-        raise ValueError(f"must not be more than {max_value}")
-    return number
-
-
-def parse_date_value(value):
-    if isinstance(value, datetime.datetime):
-        return value.date()
-    if isinstance(value, datetime.date):
-        return value
-    if not isinstance(value, str):
-        return None
-    try:
-        return parse_date(value.strip())
-    except ValueError:  # well formatted but impossible, like 2024-02-30
-        return None
+from expenses.services.validation import (
+    DEFAULT_CURRENCY,
+    MAX_AMOUNT,
+    MAX_QUANTITY,
+    parse_amount,
+    parse_date_value,
+)
 
 
 def _clean_items(raw_items, errors):

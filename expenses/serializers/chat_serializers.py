@@ -6,7 +6,7 @@ from expenses.models import ChatMessage
 class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
-        fields = ["id", "role", "content", "created_at"]
+        fields = ["id", "role", "content", "tools_used", "created_at"]
         read_only_fields = fields
 
 

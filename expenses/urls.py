@@ -12,6 +12,7 @@ urlpatterns = [
     path("upload/", receipt_views.upload_page, name="upload"),
     path("expenses/", expense_views.expenses_page, name="expenses"),
     path("chat/", chat_views.chat_page, name="chat"),
+    path("receipts/<int:receipt_id>/image/", receipt_views.receipt_image, name="receipt-image"),
     path("api/receipts/", receipt_views.ReceiptUploadView.as_view(), name="api-receipt-upload"),
     path("api/receipts/<int:receipt_id>/confirm/", receipt_views.ReceiptConfirmView.as_view(), name="api-receipt-confirm"),
     path("api/expenses/", expense_views.ExpenseListView.as_view(), name="api-expense-list"),

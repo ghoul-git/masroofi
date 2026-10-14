@@ -1,6 +1,5 @@
 import json
 import os
-from types import SimpleNamespace
 from unittest import mock
 
 from django.core.exceptions import ValidationError
@@ -10,42 +9,7 @@ from expenses.models import ChatMessage
 from expenses.services import chat_service
 from expenses.services.exceptions import ServiceUnavailable
 from expenses.tests.factories import make_category, make_expense, make_user
-
-
-def function_call(name, arguments, call_id="call_1"):
-    return SimpleNamespace(type="function_call", name=name, arguments=json.dumps(arguments), call_id=call_id)
-
-
-def text_response(text):
-    return SimpleNamespace(output=[SimpleNamespace(type="message")], output_text=text)
-
-
-def tool_response(*calls):
-    return SimpleNamespace(output=list(calls), output_text="")
-
-
-class FakeOpenAI:
-    """Stands in for the OpenAI client: client.responses.create returns queued responses.
-
-    Each request is recorded. The agent appends to its input list in place,
-    so a copy of the input is kept per call.
-    """
-
-    def __init__(self, *queued, error=None):
-        self.queued = list(queued)
-        self.error = error
-        self.requests = []
-        self.responses = SimpleNamespace(create=self._create)
-
-    def _create(self, **kwargs):
-        self.requests.append({**kwargs, "input": list(kwargs["input"])})
-        if self.error:
-            raise self.error
-        return self.queued.pop(0)
-
-
-def patch_openai(fake):
-    return mock.patch("expenses.ai.agent.get_client", return_value=fake)
+from expenses.tests.fakes import FakeOpenAI, function_call, patch_openai, text_response, tool_response
 
 
 @mock.patch.dict(os.environ, {"OPENAI_MODEL": "test-model"})
@@ -185,3 +149,36 @@ class ChatApiTests(TestCase):
         self.assertEqual(self.client.get("/api/chat/history/").status_code, 403)
         self.assertEqual(self.client.post("/api/chat/", {"question": "Hi"}, content_type="application/json").status_code, 403)
         self.assertEqual(self.client.get("/chat/").status_code, 302)
+
+
+@mock.patch.dict(os.environ, {"OPENAI_MODEL": "test-model"})
+class ToolsUsedSavedTests(TestCase):
+    def setUp(self):
+        self.alice = make_user("alice")
+        make_expense(self.alice, make_category("food"), "Carrefour", "12.50", date="2026-10-02")
+        self.arguments = {"start_date": "2026-10-01", "end_date": "2026-10-31", "category": None}
+
+    def ask(self):
+        fake = FakeOpenAI(tool_response(function_call("get_spending_total", self.arguments)), text_response("12.50 JOD"))
+        with patch_openai(fake):
+            return chat_service.ask(self.alice, "Total in October?")
+
+    def test_assistant_message_stores_tools_used_and_user_message_stores_none(self):
+        self.ask()
+        user_message, assistant_message = ChatMessage.objects.filter(user=self.alice).order_by("id")
+        self.assertEqual(user_message.tools_used, [])
+        self.assertEqual(assistant_message.tools_used, [{"name": "get_spending_total", "arguments": self.arguments}])
+
+    def test_history_api_returns_tools_used(self):
+        self.ask()
+        self.client.force_login(self.alice)
+        messages = self.client.get("/api/chat/history/").json()
+        self.assertEqual([m["tools_used"] for m in messages], [
+            [],
+            [{"name": "get_spending_total", "arguments": self.arguments}],
+        ])
+
+    def test_messages_saved_without_tools_default_to_an_empty_list(self):
+        message = ChatMessage.objects.create(user=self.alice, role="assistant", content="Hi")
+        message.refresh_from_db()
+        self.assertEqual(message.tools_used, [])

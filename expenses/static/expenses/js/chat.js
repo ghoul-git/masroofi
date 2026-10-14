@@ -48,7 +48,8 @@
     function toolsLine(toolsUsed, responseTime) {
         const names = [...new Set(toolsUsed.map((t) => TOOL_LABELS[t.name] || t.name))];
         const tools = names.length ? `Tools used: ${names.join(", ")}` : "No tools used";
-        return `${tools} · ${responseTime.toFixed(1)}s`;
+        // The response time is only known for answers given on this page, not for saved history.
+        return responseTime == null ? tools : `${tools} · ${responseTime.toFixed(1)}s`;
     }
 
     function setBusy(busy) {
@@ -61,7 +62,9 @@
     async function loadHistory() {
         try {
             const messages = await apiFetch("/api/chat/history/");
-            messages.forEach((m) => addMessage(m.role, m.content));
+            messages.forEach((m) =>
+                addMessage(m.role, m.content, m.role === "assistant" ? toolsLine(m.tools_used || [], null) : null)
+            );
             empty.hidden = messages.length > 0;
         } catch (error) {
             showErrors(errors, error.messages || [String(error)]);

@@ -1,6 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
 
@@ -9,10 +10,17 @@ from expenses.services import category_service, expense_service
 from expenses.views.api import ServiceAPIView
 
 
+class ExpensePagination(PageNumberPagination):
+    page_size = 20
+
+
 class ExpenseListView(ServiceAPIView):
+    """Returns {"count", "next", "previous", "results"}; ?page=N selects the page."""
+
     def get(self, request):
-        expenses = expense_service.list_expenses(request.user)
-        return Response(ExpenseSerializer(expenses, many=True).data)
+        paginator = ExpensePagination()
+        page = paginator.paginate_queryset(expense_service.list_expenses(request.user), request, view=self)
+        return paginator.get_paginated_response(ExpenseSerializer(page, many=True).data)
 
 
 class ExpenseDetailView(ServiceAPIView):
