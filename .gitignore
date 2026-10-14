@@ -225,3 +225,5 @@ media/
 evaluation/receipts/
 staticfiles/
 evaluation/sroie/
+# Personal data exports downloaded from /account/
+masroofi-data-*.json
