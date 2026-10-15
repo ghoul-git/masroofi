@@ -58,6 +58,7 @@ The project combines three areas of AI: **computer vision** (OpenCV image prepro
 | Images | Pillow, NumPy | 12.3.0 / 2.4.6 | Image upload validation, image arrays |
 | Configuration | python-dotenv | 1.2.4 | Loading settings from `.env` |
 | Static files | WhiteNoise | 6.12.0 | Serving CSS and JavaScript in production, compressed and cached |
+| Evaluation | psutil | 7.2.2 | Measuring process memory in the evaluation commands |
 | Frontend | Django templates, plain JavaScript (`fetch`), CSS | | Upload, review, expenses and chat pages |
 | Testing | Django test runner, `unittest.mock` | | Unit and API tests, with the OpenAI client and OCR mocked |
 
@@ -77,6 +78,11 @@ masroofi/
 ├── manage.py                       Django command-line entry point
 ├── requirements.txt                Pinned Python dependencies
 ├── .env.example                    Template for the environment variables (copy to .env)
+├── evaluation/                     Evaluation data and results (see the Evaluation section)
+│   ├── chat_questions.csv          Questions for the chat agent with their expected answers
+│   ├── receipts/                   Own receipt photos and labels.csv (not committed)
+│   ├── sroie/SROIE2019/            The SROIE 2019 dataset (not committed)
+│   └── results/                    Output of the evaluation commands; only summary.md is committed
 ├── config/                         Django project configuration
 │   ├── settings.py                 Settings, read from environment variables
 │   ├── urls.py                     Root URLs: admin and the expenses app (uploaded images are not public)
@@ -139,6 +145,8 @@ masroofi/
     ├── migrations/                 Database migrations (0002 creates the 7 default categories as data)
     ├── middleware.py               ConsentRequiredMiddleware: sends users without current consent to /consent/
     ├── signals.py                  Deletes a receipt's image file whenever its Receipt row is deleted
+    ├── evaluation/                 Scoring, dataset loaders and memory sampling for the evaluation commands
+    ├── management/commands/        evaluate_receipts, evaluate_agent and evaluation_report
     ├── admin.py                    Django admin registration
     └── urls.py                     Page and API routes
 ```
@@ -323,6 +331,8 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | `TERMS_VERSION` | No (defaults to `1.0`) | Current version of the Terms of Service. Change it when the terms change: every user must accept again on `/consent/` before using the app. |
 | `PRIVACY_VERSION` | No (defaults to `1.0`) | Current version of the Privacy Policy. Change it when the policy changes: every user must accept again. |
 | `PAYMENT_PLATFORMS` | No (defaults to eFAWATEERcom, Madfoatcom, CliQ and their Arabic names) | Comma-separated names of bill-payment platforms. On their receipts the store is the biller, not the platform. Setting this replaces the default list. |
+| `OPENAI_INPUT_PRICE_PER_M` | No (defaults to `0.10`) | OpenAI price in USD per million input tokens. Only used by `evaluation_report` to estimate costs. |
+| `OPENAI_OUTPUT_PRICE_PER_M` | No (defaults to `0.50`) | OpenAI price in USD per million output tokens. Only used by `evaluation_report` to estimate costs. |
 
 ## API Endpoints
 
@@ -343,6 +353,34 @@ The two endpoints that call OpenAI check the usage limits first. When a limit is
 Another user's receipt or expense id returns `404`, the same as an id that does not exist.
 
 Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/image/` returns the image file to its owner. A logged-out request is redirected to the login page, and anyone else gets `404`.
+
+## Evaluation
+
+Three management commands measure how well and how fast the AI parts work. They call the real OCR model and the real OpenAI API (so they need `OPENAI_API_KEY` and `OPENAI_MODEL`, and they cost API usage), but they do not go through the app's services: no `AIUsage` rows are written and no usage limits apply.
+
+```bash
+python manage.py evaluate_receipts --dataset own                # evaluation/receipts/, all receipts
+python manage.py evaluate_receipts --dataset sroie --limit 100  # SROIE 2019 test split
+python manage.py evaluate_agent --username <a user with expenses>
+python manage.py evaluation_report                              # writes evaluation/results/summary.md
+```
+
+**Datasets.**
+
+- `own`: the photos in `evaluation/receipts/`, labelled in `labels.csv` (columns `file,store_name,date,total`). Results are also reported for two groups: paper photos (r01, r02) and digital eFAWATEER receipts (r03 to r08).
+- `sroie`: the [SROIE 2019](https://rrc.cvc.uab.es/?ch=13) test split in `evaluation/sroie/SROIE2019/test/` (347 Malaysian receipts; `img/<id>.jpg` with JSON labels in `entities/<id>.txt`). `company` is used as the store and `address` is ignored. `--limit` defaults to 100.
+- Chat: `evaluation/chat_questions.csv` (columns `question,expected_answer`), asked for the user given with `--username`, each with an empty history.
+
+**What is measured.**
+
+- Receipts run through `preprocess`, `read_text` and `extract_fields` directly. Each stage is timed with `time.perf_counter`, with the process memory (RSS) before and after and the peak sampled by a background thread. The OCR model is loaded once before the loop, and its load time and memory are reported separately. OCR confidence and OpenAI token counts are recorded too.
+- Accuracy per field: dates are compared as `YYYY-MM-DD` (day/month/year is read first; month/day only when day/month is impossible), totals as decimals to 3 places, and stores as an exact match after normalizing case and spaces, and as a fuzzy match (similarity of at least 0.8). An empty prediction is a miss; a wrong one is a false positive and a miss. Accuracy, precision, recall and F1 are reported per field, plus the share of receipts with all three fields right.
+- Chat: an answer is correct when every number in `expected_answer` appears in it (thousands separators and Arabic digits handled, tolerance 0.01). For `decline`, it is correct when no tool was called. The CSV has an empty `manual_check` column for a person to review the answers.
+- The report has accuracy per dataset and group, latency per stage (mean, median, p95, min, max), memory, agent accuracy and latency, cost per receipt and per question (`OPENAI_INPUT_PRICE_PER_M`, `OPENAI_OUTPUT_PRICE_PER_M`), and the machine it ran on. Each operation is classed by its mean time as real-time (under 1 s), near real-time (1 to 5 s) or delayed (over 5 s).
+
+**Output.** Each run writes a per-item CSV and a JSON summary named with the dataset and time to `evaluation/results/`; the report always uses the newest file of each kind. OCR text is never written, and phone numbers are removed from store names. Only `summary.md` is committed.
+
+**Notes.** The scores measure the model's raw output: the app's own clean-up after extraction (dropping invalid values, and replacing a payment platform with the biller found in the OCR text) is not applied. SROIE receipts are Malaysian and in English, so they test the pipeline in general rather than Jordanian receipts. The scoring functions are tested in `expenses/tests/test_evaluation_scoring.py` without calling OCR or OpenAI.
 
 ## Known Limitations
 

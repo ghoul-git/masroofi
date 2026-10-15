@@ -227,3 +227,6 @@ staticfiles/
 evaluation/sroie/
 # Personal data exports downloaded from /account/
 masroofi-data-*.json
+# Evaluation output: only the summary is committed
+evaluation/results/*
+!evaluation/results/summary.md

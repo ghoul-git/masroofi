@@ -31,6 +31,11 @@ def env_int(name, default):
     return default if value is None or value.strip() == "" else int(value)
 
 
+def env_float(name, default):
+    value = os.getenv(name)
+    return default if value is None or value.strip() == "" else float(value)
+
+
 def env_list(name):
     """A comma-separated variable as a list, ignoring blanks: "a.com, b.com" -> ["a.com", "b.com"]."""
     return [item.strip() for item in os.getenv(name, "").split(",") if item.strip()]
@@ -229,3 +234,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 TERMS_VERSION = os.getenv("TERMS_VERSION", "").strip() or "1.0"
 PRIVACY_VERSION = os.getenv("PRIVACY_VERSION", "").strip() or "1.0"
+
+
+# OpenAI prices in USD per million tokens, used only by the evaluation_report command
+# to estimate the cost per receipt and per chat question.
+
+OPENAI_INPUT_PRICE_PER_M = env_float("OPENAI_INPUT_PRICE_PER_M", 0.10)
+OPENAI_OUTPUT_PRICE_PER_M = env_float("OPENAI_OUTPUT_PRICE_PER_M", 0.50)
