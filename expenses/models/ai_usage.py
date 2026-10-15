@@ -11,6 +11,9 @@ class AIUsage(models.Model):
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ai_usage")
     kind = models.CharField(max_length=10, choices=Kind.choices)
+    # The receipt this row counts. The row is created when the receipt is queued and the
+    # worker fills in the tokens; it stays (for the limits) if the receipt is deleted.
+    receipt = models.ForeignKey("Receipt", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     input_tokens = models.PositiveIntegerField(default=0)
     output_tokens = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)

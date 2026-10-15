@@ -14,21 +14,21 @@
 
     <form id="upload-form">
         <label for="receipt-image">Receipt photo</label>
-        <input type="file" id="receipt-image" name="image" accept="image/*" required{% if usage.limit_reached %} disabled{% endif %}>
+        {# capture="environment" opens the back camera on phones. #}
+        <input type="file" id="receipt-image" name="image" accept="image/*" capture="environment" required{% if usage.limit_reached %} disabled{% endif %}>
         <ul class="errors" id="upload-errors" hidden></ul>
         <button type="submit" class="button" id="upload-button"{% if usage.limit_reached %} disabled{% endif %}>Read receipt</button>
     </form>
 
-    <p id="loading" class="muted" hidden>
-        <span class="spinner"></span>Reading your receipt. This can take up to a minute.
-    </p>
+    <div id="loading" role="status" hidden>
+        <p><span class="spinner"></span>Reading your receipt…</p>
+        <p class="muted">This usually takes under a minute. Keep this page open; the form appears when it is ready.</p>
+    </div>
 </div>
 
 <form id="review-form" class="card" style="margin-top: 1.5rem;" hidden novalidate>
     <h2>Review and save</h2>
-    <p id="failed-notice" class="notice" hidden>
-        We couldn't read this receipt automatically. Please fill in the fields yourself.
-    </p>
+    <p id="failed-notice" class="notice" hidden></p>
 
     <div class="grid">
         <div class="field">
@@ -55,7 +55,7 @@
 
     <h3>Items</h3>
     <div class="table-wrap">
-        <table>
+        <table class="stack">
             <thead>
                 <tr>
                     <th>Name</th>
@@ -72,7 +72,7 @@
 
     <details style="margin-top: 1rem;">
         <summary class="muted">Text read from the receipt</summary>
-        <pre id="raw-text" style="white-space: pre-wrap;"></pre>
+        <pre id="raw-text" class="raw-text"></pre>
     </details>
 
     <ul class="errors" id="review-errors" hidden></ul>

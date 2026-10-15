@@ -241,3 +241,13 @@ PRIVACY_VERSION = os.getenv("PRIVACY_VERSION", "").strip() or "1.0"
 
 OPENAI_INPUT_PRICE_PER_M = env_float("OPENAI_INPUT_PRICE_PER_M", 0.10)
 OPENAI_OUTPUT_PRICE_PER_M = env_float("OPENAI_OUTPUT_PRICE_PER_M", 0.50)
+
+
+# Speed of the AI steps. Reasoning effort for the two OpenAI calls: none, minimal, low,
+# medium or high (what the model supports). "off" leaves the parameter out, for models
+# without reasoning. Receipt photos are downscaled to at most OCR_MAX_SIDE pixels on
+# their longest side before OCR.
+
+OPENAI_EXTRACTION_REASONING = os.getenv("OPENAI_EXTRACTION_REASONING", "").strip() or "none"
+OPENAI_AGENT_REASONING = os.getenv("OPENAI_AGENT_REASONING", "").strip() or "low"
+OCR_MAX_SIDE = env_int("OCR_MAX_SIDE", 1280)

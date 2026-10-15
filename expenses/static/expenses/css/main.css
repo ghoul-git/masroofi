@@ -1,9 +1,14 @@
 /* Shared styles for every page (moved out of base.html). */
+:root {
+    /* Also the web app's theme and background colours (expenses/views/pwa_views.py). */
+    --brand: #0f766e;
+    --page-background: #f5f6f8;
+}
 * { box-sizing: border-box; }
 body {
     margin: 0;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: #f5f6f8;
+    background: var(--page-background);
     color: #1f2933;
 }
 .navbar {
@@ -17,21 +22,26 @@ body {
 .navbar .brand {
     font-weight: 700;
     font-size: 1.2rem;
-    color: #0f766e;
+    color: var(--brand);
     text-decoration: none;
 }
+.nav-toggle { display: none; }
 .navbar .links {
     display: flex;
     align-items: center;
     gap: 1rem;
 }
 .navbar a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
     color: #1f2933;
     text-decoration: none;
 }
 .navbar a:hover { color: #0f766e; }
 .navbar form { margin: 0; }
 .link-button {
+    min-height: 44px;
     background: none;
     border: none;
     padding: 0;
@@ -55,20 +65,26 @@ main {
 label { display: block; margin-bottom: 0.25rem; font-weight: 600; }
 input[type="text"], input[type="email"], input[type="password"] {
     width: 100%;
+    min-height: 44px;
     padding: 0.5rem;
     margin-bottom: 1rem;
     border: 1px solid #cbd2d9;
     border-radius: 4px;
     font: inherit;
 }
+/* Buttons and fields are at least 44 px tall so they are easy to tap. */
 .button {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
     padding: 0.5rem 1rem;
     background: #0f766e;
     color: #ffffff;
     border: none;
     border-radius: 4px;
     font: inherit;
+    text-decoration: none;
     cursor: pointer;
 }
 .button:hover { background: #115e59; }
@@ -78,6 +94,7 @@ input[type="text"], input[type="email"], input[type="password"] {
 }
 input[type="date"], input[type="number"], input[type="file"], select {
     width: 100%;
+    min-height: 44px;
     padding: 0.5rem;
     margin-bottom: 1rem;
     border: 1px solid #cbd2d9;
@@ -160,7 +177,7 @@ td.number, th.number { text-align: right; }
 .chat-form { display: flex; gap: 0.5rem; align-items: flex-end; margin-top: 1rem; }
 .chat-form textarea {
     flex: 1;
-    min-height: 2.6rem;
+    min-height: 44px;
     max-height: 10rem;
     padding: 0.5rem;
     border: 1px solid #cbd2d9;
@@ -172,6 +189,7 @@ td.number, th.number { text-align: right; }
 /* Expenses page pagination */
 .pagination {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
@@ -221,3 +239,83 @@ td.needs-check { box-shadow: inset 3px 0 0 #d97706; }
     margin: -0.75rem 0 1rem;
 }
 ul.notice { padding-left: 2rem; }
+
+/* Receipt text on the review form */
+.raw-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- Small screens (phones) */
+@media (max-width: 640px) {
+    main { margin: 1rem auto; }
+    .card { padding: 1rem; }
+    .navbar { flex-wrap: wrap; padding: 0.5rem 1rem; }
+
+    /* The menu collapses behind a button (site.js adds .collapsible and toggles .open). */
+    .navbar.collapsible .nav-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 44px;
+        padding: 0 0.75rem;
+        background: none;
+        border: 1px solid #cbd2d9;
+        border-radius: 4px;
+        font: inherit;
+        color: #1f2933;
+        cursor: pointer;
+    }
+    .navbar.collapsible .links { display: none; }
+    .navbar.collapsible.open .links {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+    .navbar.collapsible.open .links a,
+    .navbar.collapsible.open .links .link-button {
+        width: 100%;
+        border-top: 1px solid #e3e6ea;
+        text-align: left;
+    }
+
+    /* Tables become a stack of cards: one card per row, each cell labelled from data-label. */
+    table.stack thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+    }
+    table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+    table.stack tr {
+        margin-bottom: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid #e3e6ea;
+        border-radius: 8px;
+        background: #ffffff;
+    }
+    table.stack td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.35rem 0;
+        border-bottom: none;
+        text-align: right;
+    }
+    table.stack td[data-label]::before {
+        content: attr(data-label);
+        flex-shrink: 0;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #52606d;
+        text-align: left;
+    }
+    table.stack td:not([data-label]) { display: block; text-align: left; }
+    table.stack td input, table.stack td select { flex: 1; min-width: 0; }
+    table.stack td .actions { justify-content: flex-end; }
+
+    .message { max-width: 90%; }
+    .site-footer { flex-wrap: wrap; gap: 0.75rem 1.5rem; }
+}

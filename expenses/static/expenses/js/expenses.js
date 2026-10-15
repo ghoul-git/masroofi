@@ -1,5 +1,5 @@
 (function () {
-    const { apiFetch, showErrors, categoryOptions, formatAmount } = window.Masroofi;
+    const { apiFetch, showErrors, categoryOptions, formatAmount, labelCells } = window.Masroofi;
     const categories = JSON.parse(document.getElementById("categories-data").textContent);
 
     const body = document.getElementById("expenses-body");
@@ -8,6 +8,7 @@
     const loading = document.getElementById("loading");
     const empty = document.getElementById("empty");
     const tableWrap = document.getElementById("table-wrap");
+    const table = tableWrap.querySelector("table");
     const pagination = document.getElementById("pagination");
     const previousButton = document.getElementById("previous-page");
     const nextButton = document.getElementById("next-page");
@@ -82,7 +83,7 @@
                 button("Delete", "button-danger", () => row.replaceWith(renderDeleteRow(expense)))
             )
         );
-        return row;
+        return labelCells(table, row);
     }
 
     function renderEditRow(expense) {
@@ -132,7 +133,7 @@
                 row.replaceWith(renderRow(expense));
             }))
         );
-        return row;
+        return labelCells(table, row);
     }
 
     function renderDeleteRow(expense) {

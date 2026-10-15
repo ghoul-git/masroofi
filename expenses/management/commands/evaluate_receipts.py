@@ -4,8 +4,9 @@
     python manage.py evaluate_receipts --dataset sroie --limit 100
 
 Runs expenses.ai directly, not the services, so no AIUsage rows are written and no
-user limits apply. Writes receipts_<dataset>_<time>.csv (one row per receipt) and
-.json (summary) to --output-dir. OCR text is never written.
+user limits apply. As in the app, phone numbers and customer names are redacted from
+the OCR text before it is sent to OpenAI. Writes receipts_<dataset>_<time>.csv (one
+row per receipt) and .json (summary) to --output-dir. OCR text is never written.
 """
 import collections
 import csv
@@ -15,6 +16,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from expenses.ai import redaction
 from expenses.evaluation import datasets, scoring
 from expenses.evaluation.resources import PeakMemorySampler, Stage, machine_info, rss_mb, timestamp, write_json
 
@@ -106,6 +108,7 @@ class Command(BaseCommand):
 
             with Stage(sampler) as stage:
                 raw_text, confidence = read_text(image)
+            raw_text = redaction.redact(raw_text)  # outside the timed stage: OCR time stays comparable
             row.update(ocr_s=stage.seconds, rss_after_ocr_mb=stage.rss_after, peak_ocr_mb=stage.peak,
                        ocr_confidence=round(confidence, 4))
 

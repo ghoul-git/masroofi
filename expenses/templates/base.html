@@ -6,11 +6,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Masroofi{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'expenses/css/main.css' %}">
+    {# Installable web app; iOS reads the apple-* tags instead of the manifest. #}
+    <link rel="manifest" href="{% url 'manifest' %}">
+    <meta name="theme-color" content="#0f766e">
+    <link rel="icon" href="{% static 'expenses/icons/icon-192.png' %}" type="image/png">
+    <link rel="apple-touch-icon" href="{% static 'expenses/icons/apple-touch-icon.png' %}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Masroofi">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
 </head>
 <body>
-    <nav class="navbar">
+    <nav class="navbar" id="navbar">
         <a class="brand" href="{% url 'home' %}">Masroofi</a>
-        <div class="links">
+        {# Shown by site.js on small screens; without JavaScript the links simply wrap. #}
+        <button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-links" hidden>
+            <span aria-hidden="true">&#9776;</span> Menu
+        </button>
+        <div class="links" id="nav-links">
             {% if user.is_authenticated %}
                 <a href="{% url 'home' %}">Home</a>
                 <a href="{% url 'upload' %}">Upload</a>
@@ -37,6 +50,7 @@
         <a href="{% url 'privacy' %}">Privacy Policy</a>
     </footer>
 
+    <script src="{% static 'expenses/js/site.js' %}" data-service-worker="{% url 'service-worker' %}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

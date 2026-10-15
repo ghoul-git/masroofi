@@ -7,19 +7,31 @@ from rest_framework.response import Response
 
 from expenses.models import Receipt
 from expenses.serializers.expense_serializers import CategorySerializer, ExpenseSerializer
-from expenses.serializers.receipt_serializers import ProcessedReceiptSerializer, ReceiptUploadSerializer
+from expenses.serializers.receipt_serializers import (
+    QueuedReceiptSerializer,
+    ReceiptStatusSerializer,
+    ReceiptUploadSerializer,
+)
 from expenses.services import category_service, receipt_service, usage_service
 from expenses.views.api import ServiceAPIView
 
 
 class ReceiptUploadView(ServiceAPIView):
+    """Queue a receipt photo. The process_receipts worker reads it; poll ReceiptDetailView for the result."""
+
     parser_classes = [MultiPartParser]
 
     def post(self, request):
         upload = ReceiptUploadSerializer(data=request.data)
         upload.is_valid(raise_exception=True)
-        result = receipt_service.process_receipt(request.user, upload.validated_data["image"])
-        return Response(ProcessedReceiptSerializer(result).data, status=status.HTTP_201_CREATED)
+        result = receipt_service.queue_receipt(request.user, upload.validated_data["image"])
+        return Response(QueuedReceiptSerializer(result).data, status=status.HTTP_202_ACCEPTED)
+
+
+class ReceiptDetailView(ServiceAPIView):
+    def get(self, request, receipt_id):
+        receipt = receipt_service.get_receipt(request.user, receipt_id)
+        return Response(ReceiptStatusSerializer(receipt).data)
 
 
 class ReceiptConfirmView(ServiceAPIView):

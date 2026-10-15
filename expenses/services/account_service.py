@@ -51,6 +51,7 @@ def export_user_data(user) -> dict:
                 "status": r.status,
                 "uploaded_at": _iso(r.uploaded_at),
                 "raw_text": r.raw_text,
+                "extracted": r.extracted,
                 "image_file": r.image.name,
             }
             for r in receipt_repository.list_for_user(user)

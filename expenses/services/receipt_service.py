@@ -1,9 +1,12 @@
+import datetime
 import logging
 from dataclasses import dataclass, field
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
+from expenses.ai import redaction
 from expenses.models import AIUsage, Expense, Receipt
 from expenses.repositories import category_repository, expense_repository, receipt_repository
 from expenses.services import review_checks, usage_service
@@ -18,14 +21,22 @@ from expenses.services.validation import (
 
 logger = logging.getLogger(__name__)
 
+# A receipt still "processing" after this long belongs to a worker that stopped; it is queued again.
+STUCK_AFTER = datetime.timedelta(minutes=10)
+
 
 @dataclass
-class ProcessedReceipt:
+class QueuedReceipt:
     receipt: Receipt
-    fields: dict = field(default_factory=dict)
-    confidence: float = 0.0
-    usage: dict = field(default_factory=dict)  # usage_service.receipt_usage after this receipt
-    warnings: dict = field(default_factory=dict)  # {field: message} to show on the review form
+    usage: dict  # usage_service.receipt_usage including this receipt
+
+
+@dataclass
+class RedactionPlan:
+    """What redact_existing would change: {receipt id: redacted text}, and receipts whose image is deleted."""
+
+    texts: dict = field(default_factory=dict)
+    image_receipt_ids: list = field(default_factory=list)
 
 
 def _empty_fields() -> dict:
@@ -100,30 +111,52 @@ def _review(fields: dict, raw_text: str) -> dict:
     return warnings
 
 
-def process_receipt(user, image_file) -> ProcessedReceipt:
-    """Save the image, read it with OCR and extract the receipt fields.
+def queue_receipt(user, image_file) -> QueuedReceipt:
+    """Save the image as a queued receipt for the process_receipts worker. No OCR or OpenAI call here.
 
-    Any failure in the AI steps marks the receipt as failed instead of raising,
-    so the user can still fill in the fields by hand and confirm.
-
-    Raises LimitReached, before the image is saved or anything is sent to
-    OpenAI, when a usage limit has been reached. Every processed receipt,
-    failed or not, is recorded as one AIUsage row.
+    Raises LimitReached, before the image is saved, when a usage limit has been
+    reached. The receipt counts towards the limits from now on (one AIUsage row,
+    whose tokens the worker fills in), whether reading it succeeds or not.
     """
     usage_service.check_receipt_allowed(user)
+    with transaction.atomic():
+        receipt = receipt_repository.create(user, image_file)
+        usage_service.record(user, AIUsage.Kind.RECEIPT, receipt=receipt)
+    return QueuedReceipt(receipt=receipt, usage=usage_service.receipt_usage(user))
 
-    # Imported here because loading EasyOCR pulls in PyTorch, which would
-    # otherwise slow down every Django start.
+
+def claim_next_receipt() -> Receipt | None:
+    """Take the oldest queued receipt and mark it processing, or return None if there is none.
+
+    The row is locked with SKIP LOCKED, so several workers never take the same receipt.
+    """
+    with transaction.atomic():
+        receipt = receipt_repository.next_queued_for_update()
+        if receipt is None:
+            return None
+        receipt.status, receipt.processing_started_at = Receipt.Status.PROCESSING, timezone.now()
+        receipt_repository.update_by_id(receipt.pk, status=receipt.status,
+                                        processing_started_at=receipt.processing_started_at)
+    return receipt
+
+
+def process_claimed_receipt(receipt) -> str:
+    """Read a claimed receipt with OCR, extract its fields and store the result. Returns the new status.
+
+    Any failure in the AI steps marks the receipt as failed instead of raising, so
+    the user can still fill in the fields by hand. Phone numbers and the customer's
+    name are redacted from the OCR text before it is sent to OpenAI or stored.
+    """
+    # Imported here so only the worker loads EasyOCR and PyTorch; the web process never does.
     from expenses.ai.extraction import extract_fields
     from expenses.ai.ocr import read_text
     from expenses.ai.preprocessing import preprocess
 
-    receipt = receipt_repository.create(user, image_file)
     raw_text, confidence, fields, tokens, warnings = "", 0.0, _empty_fields(), None, {}
-
     try:
         image = preprocess(receipt.image.path)
         raw_text, confidence = read_text(image)
+        raw_text = redaction.redact(raw_text)
         if not raw_text.strip():
             raise ValueError("OCR found no text in the image.")
         extracted, tokens = extract_fields(raw_text, category_repository.list_names())
@@ -134,13 +167,22 @@ def process_receipt(user, image_file) -> ProcessedReceipt:
         logger.exception("Processing failed for receipt %s", receipt.pk)
         status = Receipt.Status.FAILED
 
-    usage_service.record(user, AIUsage.Kind.RECEIPT, tokens)
-    receipt_repository.update(user, receipt.pk, raw_text=raw_text, status=status)
-    receipt = receipt_repository.get(user, receipt.pk)
-    return ProcessedReceipt(
-        receipt=receipt, fields=fields, confidence=confidence,
-        usage=usage_service.receipt_usage(user), warnings=warnings,
+    usage_service.record_receipt_tokens(receipt.pk, tokens)
+    receipt_repository.update_if_processing(
+        receipt.pk, status=status, raw_text=raw_text, extracted=fields, warnings=warnings,
+        ocr_confidence=confidence, processing_started_at=None,
     )
+    return status
+
+
+def requeue_receipt(receipt_id) -> None:
+    """Put a receipt the worker was stopped in the middle of back in the queue."""
+    receipt_repository.update_if_processing(receipt_id, status=Receipt.Status.QUEUED, processing_started_at=None)
+
+
+def requeue_stuck_receipts() -> int:
+    """Queue again receipts left processing for more than STUCK_AFTER by a worker that stopped."""
+    return receipt_repository.requeue_processing_started_before(timezone.now() - STUCK_AFTER)
 
 
 def get_receipt(user, receipt_id) -> Receipt:
@@ -151,7 +193,11 @@ def get_receipt(user, receipt_id) -> Receipt:
 
 
 def confirm_receipt(user, receipt_id, data) -> Expense:
-    """Save the reviewed fields as an Expense with its Items and confirm the receipt."""
+    """Save the reviewed fields as an Expense with its Items and confirm the receipt.
+
+    The image is no longer needed once the expense is saved, so its file is deleted
+    and the field cleared (data minimization); the extracted data stays.
+    """
     with transaction.atomic():
         receipt = receipt_repository.get_for_update(user, receipt_id)
         if receipt is None:
@@ -161,5 +207,34 @@ def confirm_receipt(user, receipt_id, data) -> Expense:
 
         fields, items = clean_expense_data(data)
         expense = expense_repository.create(user, receipt=receipt, items=items, **fields)
-        receipt_repository.update(user, receipt.pk, status=Receipt.Status.CONFIRMED)
+        receipt_repository.update(user, receipt.pk, status=Receipt.Status.CONFIRMED, image="")
+        _delete_image_after_commit(receipt.image)
     return expense
+
+
+def _delete_image_after_commit(image) -> None:
+    """Delete the file only once the transaction commits, so a rollback never loses an image."""
+    if image:
+        storage, name = image.storage, image.name
+        transaction.on_commit(lambda: storage.delete(name))
+
+
+def redaction_plan() -> RedactionPlan:
+    """Receipts whose stored text still has phone numbers or a customer name, and confirmed
+    receipts that still have an image. Nothing is changed."""
+    plan = RedactionPlan()
+    for receipt in receipt_repository.with_raw_text().iterator():
+        redacted = redaction.redact(receipt.raw_text)
+        if redacted != receipt.raw_text:
+            plan.texts[receipt.pk] = redacted
+    plan.image_receipt_ids = [r.pk for r in receipt_repository.confirmed_with_image()]
+    return plan
+
+
+def apply_redaction_plan(plan: RedactionPlan) -> None:
+    for receipt_id, text in plan.texts.items():
+        receipt_repository.update_by_id(receipt_id, raw_text=text)
+    for receipt in receipt_repository.confirmed_with_image().filter(pk__in=plan.image_receipt_ids):
+        with transaction.atomic():
+            receipt_repository.update_by_id(receipt.pk, image="")
+            _delete_image_after_commit(receipt.image)

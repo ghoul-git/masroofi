@@ -17,20 +17,23 @@ Masroofi (مصروفي, "my spending") is a web app that turns photos of paper r
 **How it works.**
 
 ```
-receipt photo
-  -> OpenCV preprocessing   resize, grayscale, denoise, contrast (CLAHE)
+receipt photo             uploaded from the phone camera; the request returns at once (202)
+  -> queue                  a background worker (python manage.py process_receipts) picks it up
+  -> OpenCV preprocessing   downscale to 1280 px, grayscale, denoise, contrast (CLAHE)
   -> EasyOCR                Arabic + English text recognition
-  -> LLM field extraction   raw OCR text -> JSON: store, date, total, currency, category, items
+  -> redaction              phone numbers -> [PHONE], customer name -> [NAME]
+  -> LLM field extraction   redacted OCR text -> JSON: store, date, total, currency, category, items
   -> user review            pre-filled form, the user corrects and confirms
   -> PostgreSQL             Expense + Items saved in one transaction
   -> chat agent             LLM with database tools answers questions about the saved expenses
 ```
 
-**How it solves the problem.** Recording an expense goes from typing everything by hand to taking a photo and checking a form, which keeps the effort low enough for people to keep doing it. The chat assistant makes the stored data useful without the user building reports.
+**How it solves the problem.** Recording an expense goes from typing everything by hand to taking a photo and checking a form, which keeps the effort low enough for people to keep doing it. Masroofi can be installed on a phone's home screen like an app. The chat assistant makes the stored data useful without the user building reports.
 
 **Why this approach.**
 
-- **Preprocessing before OCR.** Phone photos of receipts are often blurry, unevenly lit and low contrast. Cleaning the image first makes OCR noticeably more accurate.
+- **Preprocessing before OCR.** Phone photos of receipts are often blurry, unevenly lit and low contrast. Cleaning the image first makes OCR noticeably more accurate. Photos are also scaled down to at most 1280 px on their longest side (`OCR_MAX_SIDE`), because OCR time grows with the number of pixels.
+- **Reading in the background.** The evaluation measured about 40 seconds per receipt on a CPU, too long for a web request. The upload only saves the photo and returns; a separate worker process loads the OCR model once and reads queued receipts one after another, while the page shows "Reading your receipt…" and checks for the result every 2 seconds. The web server never loads EasyOCR or PyTorch, so it starts fast and stays small.
 - **OCR and an LLM together.** OCR gives the raw text, but receipts have no fixed layout. An LLM is good at understanding messy, mixed-language text and mapping it to fields, which hand-written rules cannot do for every shop.
 - **A human review step.** OCR and LLMs make mistakes. Because the user confirms every value before it is saved, a wrong reading never silently becomes wrong data. If reading fails completely, the user can still type the fields in the same form. Values that are often wrong are highlighted in amber with a note: a date in the future or more than a year ago ("Please check this date"), and a bill-payment platform such as eFAWATEERcom given as the store instead of the company paid. These are warnings only; saving is never blocked.
 - **Jordanian receipts.** Amounts are stored and shown with 3 decimal places, because the dinar has 1000 fils. The extraction prompt tells the model today's date and that dates are written day/month/year. On payment-platform receipts the store is the biller (Biller / مزود الخدمة); if the model still returns the platform, the app looks for the biller in the OCR text and otherwise flags the store for review.
@@ -43,6 +46,7 @@ The project combines three areas of AI: **computer vision** (OpenCV image prepro
 - **Consent before any processing.** Registration requires three unticked boxes: the Terms of Service, the processing of receipt and expense data as described in the Privacy Policy (including sending receipt text to an AI provider outside Jordan), and confirming the user is 18 or older. Each acceptance is saved as a `ConsentRecord` with the Terms and Privacy versions.
 - **New versions need new consent.** When `TERMS_VERSION` or `PRIVACY_VERSION` changes, every user is sent to `/consent/` after login until they accept again. Users who registered before consent existed are treated the same way.
 - **Access and erasure.** On `/account/` a user can download all their data as JSON, or delete their account. Deleting needs the current password and removes every row and every receipt image file. Withdrawing consent leads to the same deletion, because without consent the data can no longer be processed.
+- **Data minimization.** Before OCR text is sent to OpenAI or saved, Jordanian phone numbers (mobiles such as 0796268159, landlines such as 06 5504142, and the +962 / 00962 forms) are replaced with `[PHONE]`, and the value of a "Customer name" / "اسم العميل" field with `[NAME]` (`expenses/ai/redaction.py`). Once a receipt is confirmed, its photo is deleted; the expense and the redacted text stay. `python manage.py redact_existing` applies both rules to receipts saved before they existed.
 
 ## 3. Technologies Used
 
@@ -91,16 +95,18 @@ masroofi/
     ├── models/                     Database tables, one file per model
     │   ├── user.py                 Custom user model (AUTH_USER_MODEL)
     │   ├── category.py             Expense categories, shared by all users, names unique regardless of case
-    │   ├── receipt.py              Uploaded image (saved as receipts/<user id>/<random name>), OCR text and status
+    │   ├── receipt.py              Uploaded image (receipts/<user id>/<random name>, deleted once confirmed), status
+    │   │                           (queued, processing, extracted, failed, confirmed), redacted OCR text, extracted fields
     │   ├── expense.py              A confirmed expense: store, date, total, currency, category
     │   ├── item.py                 Line items of an expense
     │   ├── chat_message.py         Saved chat questions and answers, with the tools used for each answer
-    │   ├── ai_usage.py             One row per receipt processed and question answered, with OpenAI token counts
+    │   ├── ai_usage.py             One row per receipt uploaded and question answered, with OpenAI token counts
     │   └── consent_record.py       Which Terms and Privacy versions a user accepted, and when
     ├── ai/                         Computer vision, NLP and agent code
-    │   ├── preprocessing.py        OpenCV: resize, grayscale, denoise, CLAHE contrast
-    │   ├── ocr.py                  EasyOCR reader (Arabic + English), loaded once and reused
-    │   ├── client.py               Shared OpenAI client (30 s timeout, 2 retries) used by extraction and agent
+    │   ├── preprocessing.py        OpenCV: downscale to OCR_MAX_SIDE, grayscale, denoise, CLAHE contrast
+    │   ├── ocr.py                  EasyOCR reader (Arabic + English), loaded once and reused (worker only)
+    │   ├── redaction.py            Replaces phone numbers and the customer's name in OCR text
+    │   ├── client.py               Shared OpenAI client (30 s timeout, 2 retries) and the reasoning-effort argument
     │   ├── prompts/                System prompts as Markdown files, loaded with load_prompt(name, **values)
     │   │   ├── receipt_extraction.md
     │   │   └── chat_agent.md
@@ -108,7 +114,8 @@ masroofi/
     │   ├── tools.py                Database tools for the agent, their JSON schemas and run_tool()
     │   └── agent.py                Tool-calling loop on the OpenAI Responses API
     ├── services/                   Business logic
-    │   ├── receipt_service.py      process_receipt() runs the AI pipeline, confirm_receipt() validates and saves
+    │   ├── receipt_service.py      queue_receipt() for uploads; claim and process for the worker; confirm_receipt()
+    │   │                           validates, saves and deletes the image; the redact_existing plan
     │   ├── expense_service.py      List, update and delete expenses, expense field validation
     │   ├── chat_service.py         ask() with the last 10 messages as history, get_history()
     │   ├── category_service.py     Category list for the dropdowns
@@ -131,22 +138,28 @@ masroofi/
     ├── views/                      Thin HTTP layer
     │   ├── api.py                  Base API view: session login required, maps service errors to 400/404/429/503
     │   ├── auth_views.py           Register and home pages
-    │   ├── receipt_views.py        Upload page, owner-only receipt image, receipt upload and confirm API
+    │   ├── receipt_views.py        Upload page, owner-only receipt image, receipt upload, status and confirm API
     │   ├── expense_views.py        Expenses page, paginated expense list, update and delete API
     │   ├── chat_views.py           Chat page, chat and history API
     │   ├── account_views.py        Consent page, account page, data download, withdraw consent, delete account
-    │   └── legal_views.py          Terms of Service and Privacy Policy pages
+    │   ├── legal_views.py          Terms of Service and Privacy Policy pages
+    │   └── pwa_views.py            Web app manifest, service worker (/sw.js) and offline page
     ├── templates/                  HTML pages (base layout with footer, login, register, home, upload, expenses, chat,
     │                               consent, account, terms, privacy, 404, 500)
+    │   └── pwa/                    sw.js (service worker) and offline.html
     ├── static/expenses/
-    │   ├── css/main.css            Styles for every page
-    │   └── js/                     Plain JavaScript for the pages (api.js holds the shared fetch + CSRF helper)
-    ├── tests/                      Tests for the services, tools, agent, API, pagination and per-user data and image isolation
+    │   ├── css/main.css            Styles for every page, including the phone layout (360 px and up)
+    │   ├── icons/                  App icons (192, 512, maskable 512, Apple 180), drawn by generate_icons
+    │   └── js/                     Plain JavaScript for the pages (api.js holds the shared fetch + CSRF helper,
+    │                               site.js the phone menu and the service worker registration)
+    ├── tests/                      Tests for the services, worker, redaction, tools, agent, API, web app files,
+    │                               pagination and per-user data and image isolation
     ├── migrations/                 Database migrations (0002 creates the 7 default categories as data)
     ├── middleware.py               ConsentRequiredMiddleware: sends users without current consent to /consent/
     ├── signals.py                  Deletes a receipt's image file whenever its Receipt row is deleted
     ├── evaluation/                 Scoring, dataset loaders and memory sampling for the evaluation commands
-    ├── management/commands/        evaluate_receipts, evaluate_agent and evaluation_report
+    ├── management/commands/        process_receipts (the worker), redact_existing, generate_icons,
+    │                               evaluate_receipts, evaluate_agent and evaluation_report
     ├── admin.py                    Django admin registration
     └── urls.py                     Page and API routes
 ```
@@ -256,11 +269,23 @@ python manage.py createsuperuser
 
 This account can log in to the admin site and also use the app. Accounts created this way have not accepted the Terms and Privacy Policy, so the first time they open the app they are asked to on `/consent/`. The admin site does not ask.
 
-### Step 8: Start the server
+### Step 8: Start the server and the receipt worker
+
+Receipts are read by a separate worker process, so the app needs two terminals, both in the project folder with the virtual environment activated.
+
+Terminal 1, the web server:
 
 ```bash
 python manage.py runserver
 ```
+
+Terminal 2, the receipt worker:
+
+```bash
+python manage.py process_receipts
+```
+
+The worker loads the OCR model once (the first time, EasyOCR also downloads it), then reads each uploaded receipt in turn and checks for new ones every 2 seconds. Stop it with Ctrl+C: a receipt it was in the middle of goes back in the queue. Without the worker, uploads wait in the queue, and after 3 minutes the upload page offers the form to fill in by hand. Options: `--once` processes what is queued and exits, and `--sleep 5` checks every 5 seconds instead of 2. On start, receipts left in `processing` for more than 10 minutes (by a worker that crashed) are queued again. Several workers can run at the same time; each receipt is taken by one of them only.
 
 Then open:
 
@@ -276,7 +301,9 @@ Then open:
 | http://127.0.0.1:8000/terms/, http://127.0.0.1:8000/privacy/ | Terms of Service and Privacy Policy (placeholders), linked in the footer of every page |
 | http://127.0.0.1:8000/admin/ | Django admin (superuser) |
 
-The first receipt you process takes longer than the rest while EasyOCR downloads and loads its models.
+**On a phone.** On the same Wi-Fi network, run `python manage.py runserver 0.0.0.0:8000`, add your computer's IP address to `ALLOWED_HOSTS`, and open `http://<that IP>:8000/` on the phone. The upload button opens the camera. To install the app, use "Add to Home screen" (Android Chrome: menu → Install app; iPhone Safari: Share → Add to Home Screen). Browsers only offer installation and run the service worker over HTTPS (or on `localhost`), so a real installation needs the production setup below.
+
+To redraw the icons in `expenses/static/expenses/icons/`, run `python manage.py generate_icons`.
 
 ### Step 9: Run the tests
 
@@ -302,6 +329,7 @@ Before starting the app:
 3. Collect the static files into `staticfiles/`: `python manage.py collectstatic --noinput`. Run it again after every deploy, or the pages cannot find their CSS and JavaScript.
 4. Check the settings: `python manage.py check --deploy`
 5. Serve `config.wsgi:application` with a production WSGI server, not `runserver`. One is not included in `requirements.txt`.
+6. Run `python manage.py process_receipts` as a second, always-running process (for example a systemd service or a hosting platform's worker process). It stops cleanly on Ctrl+C or SIGTERM.
 
 `media/` (receipt images) must be on a disk that persists between deploys.
 
@@ -331,6 +359,9 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | `TERMS_VERSION` | No (defaults to `1.0`) | Current version of the Terms of Service. Change it when the terms change: every user must accept again on `/consent/` before using the app. |
 | `PRIVACY_VERSION` | No (defaults to `1.0`) | Current version of the Privacy Policy. Change it when the policy changes: every user must accept again. |
 | `PAYMENT_PLATFORMS` | No (defaults to eFAWATEERcom, Madfoatcom, CliQ and their Arabic names) | Comma-separated names of bill-payment platforms. On their receipts the store is the biller, not the platform. Setting this replaces the default list. |
+| `OPENAI_EXTRACTION_REASONING` | No (defaults to `none`) | Reasoning effort for receipt extraction: `none`, `minimal`, `low`, `medium` or `high`, as the model supports. Lower is faster. `off` does not send the parameter, for models without reasoning. |
+| `OPENAI_AGENT_REASONING` | No (defaults to `low`) | Reasoning effort for the chat assistant, with the same values. |
+| `OCR_MAX_SIDE` | No (defaults to `1280`) | Receipt photos larger than this many pixels on their longest side are scaled down before OCR, which makes OCR faster. |
 | `OPENAI_INPUT_PRICE_PER_M` | No (defaults to `0.10`) | OpenAI price in USD per million input tokens. Only used by `evaluation_report` to estimate costs. |
 | `OPENAI_OUTPUT_PRICE_PER_M` | No (defaults to `0.50`) | OpenAI price in USD per million output tokens. Only used by `evaluation_report` to estimate costs. |
 
@@ -338,11 +369,12 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 
 All endpoints return JSON, require a logged-in session (log in through `/login/` first), and need the `X-CSRFToken` header on `POST`, `PATCH` and `DELETE` requests. A request without a logged-in session gets `403`. So does a request from a user who has not accepted the current Terms and Privacy Policy, with a `detail` asking them to accept first.
 
-The two endpoints that call OpenAI check the usage limits first. When a limit is reached they return `429` with a message in `detail` (for example "You have asked 20 questions today, which is the daily limit. You can ask more tomorrow."), and nothing is sent to OpenAI. Their successful responses include `usage`: `{"used", "limit", "limit_reached", "label"}`, where `label` is the text shown on the page, such as "12 of 30 receipts this month". `limit` is `null` for staff users.
+The two endpoints that lead to OpenAI calls (receipt upload and chat) check the usage limits first. When a limit is reached they return `429` with a message in `detail` (for example "You have asked 20 questions today, which is the daily limit. You can ask more tomorrow."), and nothing is saved or sent to OpenAI. Their successful responses include `usage`: `{"used", "limit", "limit_reached", "label"}`, where `label` is the text shown on the page, such as "12 of 30 receipts this month". `limit` is `null` for staff users.
 
 | Method | URL | Description |
 |---|---|---|
-| `POST` | `/api/receipts/` | Upload a receipt image (`multipart/form-data`, field `image`, max 10 MB). Runs preprocessing, OCR and extraction, and returns the receipt with its status, the extracted fields, `usage`, and `warnings` (`{field: message}` for values to double-check). If reading fails, the status is `failed` and the fields are empty so they can be filled in by hand. |
+| `POST` | `/api/receipts/` | Upload a receipt image (`multipart/form-data`, field `image`, max 10 MB). Only checks the image and the limits and queues it: returns `202` with `{"id", "status": "queued", "usage"}`. The worker reads it in the background. |
+| `GET` | `/api/receipts/<id>/` | The receipt's `status`: `queued`, `processing`, then `extracted` or `failed` (and `confirmed` once saved). From `extracted` or `failed` on, it also has the `extracted` fields, `warnings` (`{field: message}` for values to double-check), the redacted `raw_text` and the OCR `confidence`; before that they are `null`. A failed receipt has empty fields so they can be filled in by hand. |
 | `POST` | `/api/receipts/<id>/confirm/` | Save the reviewed fields (`store_name`, `date`, `total`, `currency`, `category`, `items`) as an expense and mark the receipt `confirmed`. Returns `400` with a message per invalid field. |
 | `GET` | `/api/expenses/` | List your expenses, newest first, with their items and `warnings`, 20 per page. Returns `{"count", "next", "previous", "results"}`; use `?page=2` and so on for later pages. A page past the end returns `404`. |
 | `PATCH` | `/api/expenses/<id>/` | Update some fields of one of your expenses. Sending `items` replaces all items. |
@@ -352,7 +384,9 @@ The two endpoints that call OpenAI check the usage limits first. When a limit is
 
 Another user's receipt or expense id returns `404`, the same as an id that does not exist.
 
-Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/image/` returns the image file to its owner. A logged-out request is redirected to the login page, and anyone else gets `404`.
+Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/image/` returns the image file to its owner. A logged-out request is redirected to the login page, and anyone else gets `404`, as does a confirmed receipt, whose image has been deleted.
+
+The web app files are public and have no user data: `/manifest.webmanifest`, `/sw.js` (the service worker; it must be at the root to control every page) and `/offline/`. The service worker caches only static files (CSS, JavaScript, icons) and the offline page. Pages, `/api/`, `/admin/`, `/account/` and receipt images always go to the network and are never cached.
 
 ## Evaluation
 
@@ -384,9 +418,11 @@ python manage.py evaluation_report                              # writes evaluat
 
 ## Known Limitations
 
-- **Images on the local disk.** Uploaded receipt images are stored in `media/` on the server (served only to their owner, through Django), so a deployment needs a persistent disk. There is no cloud storage option.
-- **Limits are counted, not locked.** Two requests sent at exactly the same moment can both pass the limit check, so a user or the global cap can go slightly over the limit. Every receipt processed counts, including ones that could not be read.
-- **Receipt processing is synchronous.** The upload request waits for OCR and the LLM to finish, which can take up to a minute on CPU. There is no background job queue.
+- **Images on the local disk.** Uploaded receipt images are stored in `media/` on the server (served only to their owner, through Django) until the receipt is confirmed, so a deployment needs a persistent disk shared by the web server and the worker. There is no cloud storage option.
+- **Limits are counted, not locked.** Two requests sent at exactly the same moment can both pass the limit check, so a user or the global cap can go slightly over the limit. Every receipt uploaded counts, including ones that could not be read.
+- **The worker must be running.** Receipts are only read while `process_receipts` runs. Each worker reads one receipt at a time, so at busy times receipts wait in the queue; more workers help, but each loads its own copy of the OCR model (about 850 MB of memory, peaking above 2 GB while reading a receipt, as measured in the evaluation). The queue is a database table polled every 2 seconds, not a message broker.
+- **Redaction is rule-based.** Only Jordanian phone number formats and a field labelled "Customer name" / "اسم العميل" are redacted. Other personal details on a receipt (an email address, a customer name under another label, a card holder's name) are still sent to OpenAI, and an OCR misread of a number can stop it being recognised.
+- **Offline use is minimal.** Installed, the app opens like a native one, but without a connection it only shows an offline page; nothing can be uploaded or viewed offline. Installation needs HTTPS. On some Android phones `capture="environment"` opens the camera directly with no option to pick an existing photo.
 - **OCR runs on the CPU.** EasyOCR is configured with `gpu=False`, so it works on any machine but is slow, and its first use needs internet access to download the models.
 - **Extraction is not always right.** Very blurry, crumpled or faded receipts can be misread or fail completely. The review step exists for this, but the user has to check the values.
 - **Depends on a paid external API.** Extraction and chat need an OpenAI API key and internet access. Each receipt and question costs API usage. The usage limits cap the total, and token counts are saved in `AIUsage`, but there is no usage report page.
@@ -396,7 +432,7 @@ python manage.py evaluation_report                              # writes evaluat
 - **Age is self-declared.** The 18+ box is not verified.
 - **Consent is all or nothing.** Withdrawing consent means deleting the account; there is no way to keep the account while stopping only the AI processing.
 - **Deletion limits.** Deleting an account removes the data from the database and the receipt images from disk, but not from database backups, and not text already sent to OpenAI, which keeps it according to its own retention policy. Empty `media/receipts/<user id>/` folders are left behind.
-- **The data download has no images.** The JSON includes the text read from each receipt and the image file name, but not the image files themselves.
+- **The data download has no images.** The JSON includes the redacted text read from each receipt and the image file name (empty once confirmed), but not the image files themselves.
 - **Short chat memory.** The assistant only sees the last 10 messages of the conversation.
 - **Review checks are simple rules.** The biller is found only when the OCR text has a label such as "Biller" or "مزود الخدمة" next to it, and a new payment platform must be added to `PAYMENT_PLATFORMS` before it is recognised. A date that is wrong but within the last year is not flagged.
 - **Item editing is limited.** Items can be edited on the review form before saving, but the expenses page only edits the main fields. The API supports replacing items.

@@ -1,5 +1,5 @@
 (function () {
-    const { apiFetch, showErrors, categoryOptions, flagField, clearFlag } = window.Masroofi;
+    const { apiFetch, showErrors, categoryOptions, flagField, clearFlag, labelCells } = window.Masroofi;
     const categories = JSON.parse(document.getElementById("categories-data").textContent);
 
     const uploadForm = document.getElementById("upload-form");
@@ -16,6 +16,18 @@
 
     const field = (id) => document.getElementById(id);
     let receiptId = null;
+
+    // The worker reads the receipt in the background; the page asks for the result every 2 seconds.
+    const POLL_INTERVAL_MS = 2000;
+    const POLL_TIMEOUT_MS = 3 * 60 * 1000;
+    const MAX_POLL_ERRORS = 5; // in a row; a single failed request (e.g. a mobile network blip) is retried
+    const READY = new Set(["extracted", "failed", "confirmed"]);
+
+    const MESSAGES = {
+        failed: "We couldn't read this receipt automatically. Please fill in the fields yourself.",
+        slow: "Reading this receipt is taking longer than usual. Please fill in the fields yourself.",
+        error: "We couldn't get the result for this receipt. Please fill in the fields yourself.",
+    };
 
     function setLoading(isLoading) {
         loading.hidden = !isLoading;
@@ -55,21 +67,24 @@
         });
         removeCell.appendChild(remove);
         row.appendChild(removeCell);
-        itemsBody.appendChild(row);
+        itemsBody.appendChild(labelCells(itemsBody.closest("table"), row));
         updateNoItems();
     }
 
-    function fillReviewForm(result) {
-        const extracted = result.extracted;
-        receiptId = result.receipt.id;
+    // receipt is the GET /api/receipts/<id>/ result, or null when there is no result to show.
+    // notice explains why the fields are empty, if they are.
+    function fillReviewForm(receipt, notice) {
+        const extracted = (receipt && receipt.extracted) || {};
+        if (!notice && receipt && receipt.status === "failed") notice = MESSAGES.failed;
 
         field("store-name").value = extracted.store_name || "";
         field("date").value = extracted.date || "";
         field("total").value = extracted.total ?? "";
         field("currency").value = extracted.currency || "JOD";
         categoryOptions(field("category"), categories, extracted.category);
-        field("raw-text").textContent = result.receipt.raw_text || "(no text was read)";
-        field("failed-notice").hidden = result.receipt.status !== "failed";
+        field("raw-text").textContent = (receipt && receipt.raw_text) || "(no text was read)";
+        field("failed-notice").textContent = notice || "";
+        field("failed-notice").hidden = !notice;
 
         itemsBody.replaceChildren();
         (extracted.items || []).forEach(addItemRow);
@@ -81,7 +96,7 @@
         // Fields the server flagged for a second look, e.g. a date a year ago or a payment platform as store.
         const flagged = { store_name: field("store-name"), date: field("date") };
         Object.values(flagged).forEach(clearFlag);
-        for (const [name, message] of Object.entries(result.warnings || {})) {
+        for (const [name, message] of Object.entries((receipt && receipt.warnings) || {})) {
             if (flagged[name]) flagField(flagged[name], message);
         }
         field("store-name").focus();
@@ -103,6 +118,26 @@
         };
     }
 
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // Poll until the worker has finished. Resolves to the receipt, or null after POLL_TIMEOUT_MS.
+    async function waitForResult(id) {
+        const deadline = Date.now() + POLL_TIMEOUT_MS;
+        let errors = 0;
+        while (Date.now() < deadline) {
+            await sleep(POLL_INTERVAL_MS);
+            try {
+                const receipt = await apiFetch(`/api/receipts/${id}/`);
+                errors = 0;
+                if (READY.has(receipt.status)) return receipt;
+            } catch (error) {
+                errors += 1;
+                if (error.status === 404 || errors >= MAX_POLL_ERRORS) throw error;
+            }
+        }
+        return null;
+    }
+
     uploadForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const file = field("receipt-image").files[0];
@@ -115,12 +150,24 @@
         body.append("image", file);
         showErrors(uploadErrors, []);
         setLoading(true);
+        let queued;
         try {
-            const result = await apiFetch("/api/receipts/", { method: "POST", body });
-            document.getElementById("usage").textContent = result.usage.label;
-            fillReviewForm(result);
+            queued = await apiFetch("/api/receipts/", { method: "POST", body });
         } catch (error) {
+            // Not uploaded (invalid image, limit reached, no connection): stay on the upload form.
             showErrors(uploadErrors, error.messages || [String(error)]);
+            setLoading(false);
+            return;
+        }
+
+        receiptId = queued.id;
+        document.getElementById("usage").textContent = queued.usage.label;
+        try {
+            const receipt = await waitForResult(queued.id);
+            fillReviewForm(receipt, receipt ? null : MESSAGES.slow);
+        } catch (error) {
+            // The receipt was saved, so it can still be confirmed with the fields filled in by hand.
+            fillReviewForm(null, MESSAGES.error);
         } finally {
             setLoading(false);
         }

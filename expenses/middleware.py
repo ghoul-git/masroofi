@@ -19,9 +19,10 @@ class ConsentRequiredMiddleware:
     """Sends logged-in users without consent to the current Terms/Privacy versions to /consent/.
 
     Exempt: admin, static files, the consent page itself, logging out, the Terms and
-    Privacy pages (so they can be read first), and /account/ (so a user who does not
-    accept can still download or delete their data). API requests get a JSON 403
-    instead of a redirect.
+    Privacy pages (so they can be read first), /account/ (so a user who does not
+    accept can still download or delete their data), and the web app manifest,
+    service worker and offline page (which have no user data and must never be
+    swapped for the consent page). API requests get a JSON 403 instead of a redirect.
     """
 
     def __init__(self, get_response):
@@ -46,6 +47,9 @@ class ConsentRequiredMiddleware:
             reverse("terms"),
             reverse("privacy"),
             reverse("account"),
+            reverse("manifest"),
+            reverse("service-worker"),
+            reverse("offline"),
         )
 
     def _needs_consent(self, request) -> bool:

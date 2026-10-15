@@ -113,5 +113,15 @@
         if (note) note.hidden = true;
     }
 
-    window.Masroofi = { apiFetch, ApiError, showErrors, categoryOptions, formatAmount, flagField, clearFlag };
+    // Copy each column heading onto the row's cells as data-label, which small screens show
+    // when the table is stacked into cards. Cells that already have one keep it.
+    function labelCells(table, row) {
+        const headings = [...table.querySelectorAll("thead th")].map((th) => th.textContent.trim());
+        [...row.children].forEach((td, index) => {
+            if (!td.dataset.label && headings[index]) td.dataset.label = headings[index];
+        });
+        return row;
+    }
+
+    window.Masroofi = { apiFetch, ApiError, showErrors, categoryOptions, formatAmount, flagField, clearFlag, labelCells };
 })();

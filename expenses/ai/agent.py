@@ -1,9 +1,10 @@
 import json
 import os
 
+from django.conf import settings
 from django.utils import timezone
 
-from expenses.ai.client import get_client
+from expenses.ai.client import get_client, reasoning_options
 from expenses.ai.prompts import load_prompt
 from expenses.ai.tools import TOOL_SCHEMAS, run_tool
 
@@ -29,6 +30,7 @@ def answer(user, question: str, history: list[dict]) -> dict:
             instructions=load_prompt("chat_agent", today=timezone.localdate().isoformat()),
             input=input_items,
             tools=TOOL_SCHEMAS,
+            **reasoning_options("responses", settings.OPENAI_AGENT_REASONING),
         )
         _add_usage(usage, response)
         calls = [item for item in response.output if item.type == "function_call"]

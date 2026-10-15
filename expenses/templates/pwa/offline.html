@@ -1,0 +1,27 @@
+{% load static %}
+{# Cached by the service worker. It must never contain user data, so it does not extend base.html. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="{{ theme_color }}">
+    <title>Offline | Masroofi</title>
+    <link rel="stylesheet" href="{% static 'expenses/css/main.css' %}">
+    <link rel="icon" href="{% static 'expenses/icons/icon-192.png' %}" type="image/png">
+</head>
+<body>
+    <nav class="navbar">
+        <span class="brand">Masroofi</span>
+    </nav>
+    <main>
+        <div class="card form-card">
+            <img src="{% static 'expenses/icons/icon-192.png' %}" alt="" width="64" height="64">
+            <h1>You're offline</h1>
+            <p>Masroofi needs an internet connection to read receipts and show your expenses.
+                Check your connection and try again.</p>
+            <button type="button" class="button" onclick="window.location.reload()">Try again</button>
+        </div>
+    </main>
+</body>
+</html>

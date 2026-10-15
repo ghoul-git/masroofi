@@ -4,7 +4,7 @@ import os
 from django.conf import settings
 from django.utils import timezone
 
-from expenses.ai.client import get_client
+from expenses.ai.client import get_client, reasoning_options
 from expenses.ai.prompts import load_prompt
 
 
@@ -25,6 +25,7 @@ def extract_fields(raw_text: str, categories: list[str]) -> tuple[dict, dict]:
             )},
             {"role": "user", "content": raw_text},
         ],
+        **reasoning_options("chat", settings.OPENAI_EXTRACTION_REASONING),
     )
     # Chat Completions names them prompt/completion tokens; usage can be missing.
     response_usage = getattr(response, "usage", None)

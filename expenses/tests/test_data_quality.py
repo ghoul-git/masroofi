@@ -15,6 +15,7 @@ from expenses.models import Expense, Item
 from expenses.services import receipt_service, review_checks
 from expenses.services.validation import MAX_AMOUNT, parse_amount
 from expenses.tests.factories import make_category, make_expense, make_receipt, make_user
+from expenses.tests.fakes import MockedReceiptAI, process_next_receipt
 
 UTC = datetime.timezone.utc
 # 09:00 UTC on 14 October 2026 is 12:00 the same day in Amman.
@@ -31,13 +32,12 @@ def days_ago(days):
 
 
 def process(user, extracted, raw_text="RAW TEXT"):
-    """Run process_receipt with OCR returning raw_text and the model returning `extracted`."""
+    """Queue a receipt and run the worker on it, with OCR returning raw_text and the model
+    returning `extracted`. Returns the stored receipt (.extracted and .warnings)."""
     image = SimpleUploadedFile("receipt.jpg", b"fake image bytes", content_type="image/jpeg")
-    usage = {"input_tokens": 10, "output_tokens": 5}
-    with mock.patch("expenses.ai.preprocessing.preprocess", return_value="image"), \
-            mock.patch("expenses.ai.ocr.read_text", return_value=(raw_text, 0.9)), \
-            mock.patch("expenses.ai.extraction.extract_fields", return_value=(extracted, usage)):
-        return receipt_service.process_receipt(user, image)
+    receipt_service.queue_receipt(user, image)
+    with MockedReceiptAI(extracted=extracted, tokens=(10, 5), text=raw_text):
+        return process_next_receipt()
 
 
 class FakeChatCompletions:
@@ -100,8 +100,8 @@ class ThreeDecimalAmountTests(TestCase):
             "store_name": "Cozmo", "date": days_ago(1), "total": 7.125,
             "items": [{"name": "Milk", "quantity": 0.5, "price": 1.375}],
         })
-        self.assertEqual(result.fields["total"], "7.125")
-        self.assertEqual(result.fields["items"], [{"name": "Milk", "quantity": "0.500", "price": "1.375"}])
+        self.assertEqual(result.extracted["total"], "7.125")
+        self.assertEqual(result.extracted["items"], [{"name": "Milk", "quantity": "0.500", "price": "1.375"}])
 
     def test_chat_tools_report_fils(self):
         make_expense(self.user, self.food, total="12.345", date="2026-10-02")
@@ -161,7 +161,7 @@ class ExtractedDateTests(TestCase):
         for date in ["2026-12-01", days_ago(400)]:
             with self.subTest(date=date), at_now():
                 result = process(self.user, {"store_name": "Cozmo", "date": date})
-                self.assertEqual(result.fields["date"], date)  # kept for the user to fix
+                self.assertEqual(result.extracted["date"], date)  # kept for the user to fix
                 self.assertEqual(result.warnings, {"date": "Please check this date"})
 
     def test_normal_date_has_no_warning(self):
@@ -176,11 +176,11 @@ class ExtractedDateTests(TestCase):
         buffer = io.BytesIO()
         Image.new("RGB", (1, 1)).save(buffer, format="PNG")
         upload = SimpleUploadedFile("r.png", buffer.getvalue(), content_type="image/png")
-        with at_now(), mock.patch("expenses.ai.preprocessing.preprocess", return_value="image"), \
-                mock.patch("expenses.ai.ocr.read_text", return_value=("RAW", 0.9)), \
-                mock.patch("expenses.ai.extraction.extract_fields",
-                           return_value=({"store_name": "Cozmo", "date": "2027-01-01"}, {})):
-            body = self.client.post("/api/receipts/", {"image": upload}).json()
+        with at_now():
+            receipt_id = self.client.post("/api/receipts/", {"image": upload}).json()["id"]
+            with MockedReceiptAI(extracted={"store_name": "Cozmo", "date": "2027-01-01"}):
+                process_next_receipt()
+            body = self.client.get(f"/api/receipts/{receipt_id}/").json()
         self.assertEqual(body["warnings"], {"date": "Please check this date"})
 
 
@@ -287,13 +287,13 @@ class PaymentPlatformReceiptTests(TestCase):
         with at_now():
             result = process(self.user, {"store_name": "eFAWATEERcom", "date": days_ago(1), "total": 25},
                              raw_text="eFAWATEERcom\nBiller: Orange Jordan\nAmount 25.000")
-        self.assertEqual(result.fields["store_name"], "Orange Jordan")
+        self.assertEqual(result.extracted["store_name"], "Orange Jordan")
         self.assertEqual(result.warnings, {})
 
     def test_platform_store_without_a_biller_is_flagged(self):
         with at_now():
             result = process(self.user, {"store_name": "CliQ", "date": days_ago(1)}, raw_text="CliQ\nAmount 25.000")
-        self.assertEqual(result.fields["store_name"], "CliQ")
+        self.assertEqual(result.extracted["store_name"], "CliQ")
         self.assertEqual(result.warnings, {"store_name": review_checks.STORE_MESSAGE})
 
     def test_both_fields_can_be_flagged_together(self):
@@ -305,7 +305,7 @@ class PaymentPlatformReceiptTests(TestCase):
         with at_now():
             result = process(self.user, {"store_name": "Carrefour", "date": days_ago(1)},
                              raw_text="Carrefour\nBiller: Someone Else")
-        self.assertEqual(result.fields["store_name"], "Carrefour")
+        self.assertEqual(result.extracted["store_name"], "Carrefour")
         self.assertEqual(result.warnings, {})
 
     def test_saving_with_a_platform_store_warns_but_saves(self):

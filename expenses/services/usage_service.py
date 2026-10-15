@@ -1,6 +1,8 @@
 """AI usage limits and tracking.
 
-Every receipt processed and every chat question answered is one AIUsage row.
+Every receipt uploaded and every chat question answered is one AIUsage row. A
+receipt's row is created when it is queued, so the limits apply at upload; the
+process_receipts worker adds the tokens once it has read the receipt.
 The limits count those rows, in the local timezone (settings.TIME_ZONE):
 
 - FREE_RECEIPTS_PER_MONTH per user, per calendar month
@@ -86,11 +88,20 @@ def check_chat_allowed(user) -> None:
         )
 
 
-def record(user, kind, tokens: dict | None = None) -> AIUsage:
+def record(user, kind, tokens: dict | None = None, receipt=None) -> AIUsage:
     tokens = tokens or {}
     return ai_usage_repository.create(
         user,
         kind,
         input_tokens=tokens.get("input_tokens", 0),
         output_tokens=tokens.get("output_tokens", 0),
+        receipt=receipt,
+    )
+
+
+def record_receipt_tokens(receipt_id, tokens: dict | None) -> None:
+    """Fill in the tokens on the row recorded when the receipt was queued."""
+    tokens = tokens or {}
+    ai_usage_repository.set_tokens_for_receipt(
+        receipt_id, tokens.get("input_tokens", 0), tokens.get("output_tokens", 0),
     )

@@ -48,3 +48,42 @@ class FakeOpenAI:
 
 def patch_openai(fake):
     return mock.patch("expenses.ai.agent.get_client", return_value=fake)
+
+
+class MockedReceiptAI:
+    """Patches the three AI steps the receipt worker runs (preprocess, OCR, extraction),
+    so no test loads EasyOCR or calls OpenAI, and records whether they were called."""
+
+    def __init__(self, extracted=None, tokens=(120, 45), text="RAW TEXT", confidence=0.9, extract_error=None):
+        if extracted is None:
+            extracted = {"store_name": "Cozmo", "total": 5, "category": "Food", "items": []}
+        self.patches = [
+            mock.patch("expenses.ai.preprocessing.preprocess", return_value="image"),
+            mock.patch("expenses.ai.ocr.read_text", return_value=(text, confidence)),
+            mock.patch("expenses.ai.extraction.extract_fields", side_effect=extract_error,
+                       return_value=(extracted, {"input_tokens": tokens[0], "output_tokens": tokens[1]})),
+        ]
+
+    def __enter__(self):
+        self.preprocess, self.read_text, self.extract = [p.start() for p in self.patches]
+        return self
+
+    def __exit__(self, *exc):
+        for p in self.patches:
+            p.stop()
+
+    def assert_nothing_called(self, test):
+        test.assertFalse(self.preprocess.called or self.read_text.called or self.extract.called)
+
+
+def process_next_receipt():
+    """Do one step of the process_receipts worker: claim the oldest queued receipt and read it.
+
+    Use inside MockedReceiptAI. Returns the receipt as stored afterwards.
+    """
+    from expenses.services import receipt_service
+
+    receipt = receipt_service.claim_next_receipt()
+    receipt_service.process_claimed_receipt(receipt)
+    receipt.refresh_from_db()
+    return receipt

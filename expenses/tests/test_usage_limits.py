@@ -12,7 +12,15 @@ from expenses.models import AIUsage, ChatMessage, Receipt
 from expenses.services import chat_service, receipt_service, usage_service
 from expenses.services.exceptions import LimitReached
 from expenses.tests.factories import make_category, make_user
-from expenses.tests.fakes import FakeOpenAI, function_call, patch_openai, text_response, tool_response
+from expenses.tests.fakes import (
+    FakeOpenAI,
+    MockedReceiptAI,
+    function_call,
+    patch_openai,
+    process_next_receipt,
+    text_response,
+    tool_response,
+)
 
 UTC = datetime.timezone.utc
 
@@ -31,30 +39,6 @@ def image():
     return SimpleUploadedFile("receipt.png", buffer.getvalue(), content_type="image/png")
 
 
-class MockedReceiptAI:
-    """Patches the three AI steps of process_receipt and records whether they were called."""
-
-    def __init__(self, tokens=(120, 45), text="RAW TEXT"):
-        extracted = {"store_name": "Cozmo", "total": 5, "category": "Food", "items": []}
-        self.patches = [
-            mock.patch("expenses.ai.preprocessing.preprocess", return_value="image"),
-            mock.patch("expenses.ai.ocr.read_text", return_value=(text, 0.9)),
-            mock.patch("expenses.ai.extraction.extract_fields",
-                       return_value=(extracted, {"input_tokens": tokens[0], "output_tokens": tokens[1]})),
-        ]
-
-    def __enter__(self):
-        self.preprocess, self.read_text, self.extract = [p.start() for p in self.patches]
-        return self
-
-    def __exit__(self, *exc):
-        for p in self.patches:
-            p.stop()
-
-    def assert_nothing_called(self, test):
-        test.assertFalse(self.preprocess.called or self.read_text.called or self.extract.called)
-
-
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(), FREE_RECEIPTS_PER_MONTH=3, GLOBAL_DAILY_AI_CALLS=1000)
 class ReceiptLimitTests(TestCase):
     def setUp(self):
@@ -63,12 +47,11 @@ class ReceiptLimitTests(TestCase):
 
     def test_allowed_below_the_limit_and_blocked_at_it(self):
         add_usage(self.user, AIUsage.Kind.RECEIPT, 2)
-        with MockedReceiptAI():
-            receipt_service.process_receipt(self.user, image())  # the 3rd of 3 is still allowed
+        receipt_service.queue_receipt(self.user, image())  # the 3rd of 3 is still allowed
         self.assertEqual(usage_service.receipt_usage(self.user)["label"], "3 of 3 receipts this month")
 
         with MockedReceiptAI() as ai, self.assertRaises(LimitReached) as ctx:
-            receipt_service.process_receipt(self.user, image())
+            receipt_service.queue_receipt(self.user, image())
         ai.assert_nothing_called(self)
         self.assertIn("all 3 free receipt scans", str(ctx.exception))
         self.assertEqual(Receipt.objects.count(), 1)  # the blocked image was not even saved
@@ -190,9 +173,9 @@ class GlobalCapTests(TestCase):
                 self.assertEqual(fake.requests, [])
                 self.assertIn("reached its AI usage limit for today", str(ctx.exception))
 
-                with MockedReceiptAI() as ai, self.assertRaises(LimitReached):
-                    receipt_service.process_receipt(user, image())
-                ai.assert_nothing_called(self)
+                with self.assertRaises(LimitReached):
+                    receipt_service.queue_receipt(user, image())
+                self.assertFalse(Receipt.objects.exists())
 
     def test_yesterdays_usage_does_not_count(self):
         AIUsage.objects.update(created_at=datetime.datetime(2026, 1, 1, tzinfo=UTC))
@@ -217,8 +200,7 @@ class StaffExemptionTests(TestCase):
         add_usage(self.staff, AIUsage.Kind.CHAT, 5)
 
     def test_staff_can_go_past_the_per_user_limits(self):
-        with MockedReceiptAI():
-            receipt_service.process_receipt(self.staff, image())
+        receipt_service.queue_receipt(self.staff, image())
         with patch_openai(FakeOpenAI(text_response("ok"))):
             result = chat_service.ask(self.staff, "Hi")
         self.assertEqual(result["usage"], {
@@ -264,25 +246,31 @@ class UsageRecordingTests(TestCase):
             chat_service.ask(self.user, "Hello")
         self.assertFalse(AIUsage.objects.exists())
 
-    def test_receipt_records_one_row_with_the_extraction_tokens(self):
-        with MockedReceiptAI(tokens=(1200, 150)):
-            result = receipt_service.process_receipt(self.user, image())
-        row = AIUsage.objects.get(user=self.user)
-        self.assertEqual((row.kind, row.input_tokens, row.output_tokens), ("receipt", 1200, 150))
+    def test_receipt_counts_when_queued_and_the_worker_adds_the_extraction_tokens(self):
+        result = receipt_service.queue_receipt(self.user, image())
         self.assertEqual(result.usage["used"], 1)
+        row = AIUsage.objects.get(user=self.user)
+        self.assertEqual((row.kind, row.receipt, row.input_tokens, row.output_tokens),
+                         ("receipt", result.receipt, 0, 0))
+
+        with MockedReceiptAI(tokens=(1200, 150)):
+            process_next_receipt()
+        row.refresh_from_db()
+        self.assertEqual((row.input_tokens, row.output_tokens), (1200, 150))
+        self.assertEqual(AIUsage.objects.count(), 1)
 
     def test_receipt_that_fails_before_openai_still_counts_with_zero_tokens(self):
+        receipt_service.queue_receipt(self.user, image())
         with MockedReceiptAI(text="") as ai, self.assertLogs("expenses.services.receipt_service", "ERROR"):
-            result = receipt_service.process_receipt(self.user, image())
+            receipt = process_next_receipt()
         ai.extract.assert_not_called()
-        self.assertEqual(result.receipt.status, Receipt.Status.FAILED)
+        self.assertEqual(receipt.status, Receipt.Status.FAILED)
         row = AIUsage.objects.get(user=self.user)
         self.assertEqual((row.kind, row.input_tokens, row.output_tokens), ("receipt", 0, 0))
 
     def test_api_responses_include_the_new_usage(self):
         self.client.force_login(self.user)
-        with MockedReceiptAI():
-            body = self.client.post("/api/receipts/", {"image": image()}).json()
+        body = self.client.post("/api/receipts/", {"image": image()}).json()
         self.assertEqual(body["usage"]["label"], "1 of 30 receipts this month")
 
         with patch_openai(FakeOpenAI(text_response("Hi"))):

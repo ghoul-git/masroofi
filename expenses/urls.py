@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from expenses.views import account_views, chat_views, expense_views, legal_views, receipt_views
+from expenses.views import account_views, chat_views, expense_views, legal_views, pwa_views, receipt_views
 from expenses.views import auth_views as app_auth
 
 urlpatterns = [
@@ -11,6 +11,9 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("consent/", account_views.consent_page, name="consent"),
     path("terms/", legal_views.terms, name="terms"),
+    path("manifest.webmanifest", pwa_views.manifest, name="manifest"),
+    path("sw.js", pwa_views.service_worker, name="service-worker"),
+    path("offline/", pwa_views.offline, name="offline"),
     path("privacy/", legal_views.privacy, name="privacy"),
     path("account/", account_views.account_page, name="account"),
     path("account/export/", account_views.export_data, name="account-export"),
@@ -22,6 +25,7 @@ urlpatterns = [
     path("chat/", chat_views.chat_page, name="chat"),
     path("receipts/<int:receipt_id>/image/", receipt_views.receipt_image, name="receipt-image"),
     path("api/receipts/", receipt_views.ReceiptUploadView.as_view(), name="api-receipt-upload"),
+    path("api/receipts/<int:receipt_id>/", receipt_views.ReceiptDetailView.as_view(), name="api-receipt-detail"),
     path("api/receipts/<int:receipt_id>/confirm/", receipt_views.ReceiptConfirmView.as_view(), name="api-receipt-confirm"),
     path("api/expenses/", expense_views.ExpenseListView.as_view(), name="api-expense-list"),
     path("api/expenses/<int:expense_id>/", expense_views.ExpenseDetailView.as_view(), name="api-expense-detail"),

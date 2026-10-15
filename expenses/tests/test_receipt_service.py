@@ -1,7 +1,6 @@
 import datetime
 import tempfile
 from decimal import Decimal
-from unittest import mock
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -10,6 +9,7 @@ from django.test import TestCase, override_settings
 from expenses.models import Expense, Item, Receipt
 from expenses.services import receipt_service
 from expenses.tests.factories import make_category, make_receipt, make_user
+from expenses.tests.fakes import MockedReceiptAI, process_next_receipt
 
 
 class ConfirmReceiptTests(TestCase):
@@ -130,12 +130,10 @@ class ConfirmReceiptTests(TestCase):
         self.assertEqual(self.receipt.status, Receipt.Status.EXTRACTED)
 
 
-EXTRACTION_TOKENS = {"input_tokens": 120, "output_tokens": 45}
-
-
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class ProcessReceiptTests(TestCase):
-    """The AI steps are mocked: these tests cover how process_receipt uses their results."""
+    """What the worker stores for a receipt. The AI steps are mocked: these tests cover how
+    their results are cleaned and saved."""
 
     def setUp(self):
         self.user = make_user()
@@ -143,16 +141,14 @@ class ProcessReceiptTests(TestCase):
         make_category("transport")
         self.image = SimpleUploadedFile("receipt.jpg", b"fake image bytes", content_type="image/jpeg")
 
-    def run_with(self, ocr_result=("RAW TEXT", 0.9), extracted=None, extract_error=None):
-        with mock.patch("expenses.ai.preprocessing.preprocess", return_value="image") as preprocess, \
-                mock.patch("expenses.ai.ocr.read_text", return_value=ocr_result), \
-                mock.patch("expenses.ai.extraction.extract_fields", return_value=(extracted, EXTRACTION_TOKENS),
-                           side_effect=extract_error) as extract:
-            result = receipt_service.process_receipt(self.user, self.image)
-        return result, preprocess, extract
+    def run_with(self, **ai_options):
+        receipt_service.queue_receipt(self.user, self.image)
+        with MockedReceiptAI(**ai_options) as ai:
+            receipt = process_next_receipt()
+        return receipt, ai
 
-    def test_extracted_fields_are_returned_and_receipt_is_marked_extracted(self):
-        result, preprocess, extract = self.run_with(extracted={
+    def test_extracted_fields_are_stored_and_receipt_is_marked_extracted(self):
+        receipt, ai = self.run_with(extracted={
             "store_name": "Carrefour",
             "date": "2026-10-05",
             "total": 12.5,
@@ -161,12 +157,14 @@ class ProcessReceiptTests(TestCase):
             "items": [{"name": "Milk", "quantity": 2, "price": 1.25}, {"name": "", "price": 1}],
         })
 
-        preprocess.assert_called_once_with(result.receipt.image.path)
-        extract.assert_called_once_with("RAW TEXT", ["Bills", "Entertainment", "Food", "Health", "Other", "Shopping", "Transport"])
-        self.assertEqual(result.receipt.user, self.user)
-        self.assertEqual(result.receipt.status, Receipt.Status.EXTRACTED)
-        self.assertEqual(result.receipt.raw_text, "RAW TEXT")
-        self.assertEqual(result.fields, {
+        ai.preprocess.assert_called_once_with(receipt.image.path)
+        ai.extract.assert_called_once_with("RAW TEXT", ["Bills", "Entertainment", "Food", "Health", "Other", "Shopping", "Transport"])
+        self.assertEqual(receipt.user, self.user)
+        self.assertEqual(receipt.status, Receipt.Status.EXTRACTED)
+        self.assertEqual(receipt.raw_text, "RAW TEXT")
+        self.assertEqual(receipt.ocr_confidence, 0.9)
+        self.assertIsNone(receipt.processing_started_at)
+        self.assertEqual(receipt.extracted, {
             "store_name": "Carrefour",
             "date": "2026-10-05",
             "total": "12.500",
@@ -176,7 +174,7 @@ class ProcessReceiptTests(TestCase):
         })
 
     def test_invalid_model_output_is_dropped(self):
-        result, _, _ = self.run_with(extracted={
+        receipt, _ = self.run_with(extracted={
             "store_name": "Shop",
             "date": "yesterday",
             "total": -3,
@@ -184,22 +182,22 @@ class ProcessReceiptTests(TestCase):
             "category": "not a category",
             "items": "not a list",
         })
-        self.assertEqual(result.receipt.status, Receipt.Status.EXTRACTED)
-        self.assertEqual(result.fields["date"], None)
-        self.assertEqual(result.fields["total"], None)
-        self.assertEqual(result.fields["currency"], "JOD")
-        self.assertEqual(result.fields["category"], None)
-        self.assertEqual(result.fields["items"], [])
+        self.assertEqual(receipt.status, Receipt.Status.EXTRACTED)
+        self.assertEqual(receipt.extracted["date"], None)
+        self.assertEqual(receipt.extracted["total"], None)
+        self.assertEqual(receipt.extracted["currency"], "JOD")
+        self.assertEqual(receipt.extracted["category"], None)
+        self.assertEqual(receipt.extracted["items"], [])
 
     def test_empty_ocr_text_marks_receipt_failed(self):
         with self.assertLogs("expenses.services.receipt_service", "ERROR"):
-            result, _, extract = self.run_with(ocr_result=("", 0.0))
-        extract.assert_not_called()
-        self.assertEqual(result.receipt.status, Receipt.Status.FAILED)
+            receipt, ai = self.run_with(text="")
+        ai.extract.assert_not_called()
+        self.assertEqual(receipt.status, Receipt.Status.FAILED)
 
     def test_extraction_error_marks_receipt_failed_but_keeps_ocr_text(self):
         with self.assertLogs("expenses.services.receipt_service", "ERROR"):
-            result, _, _ = self.run_with(extract_error=RuntimeError("API down"))
-        self.assertEqual(result.receipt.status, Receipt.Status.FAILED)
-        self.assertEqual(result.receipt.raw_text, "RAW TEXT")
-        self.assertEqual(result.fields["store_name"], "")
+            receipt, _ = self.run_with(extract_error=RuntimeError("API down"))
+        self.assertEqual(receipt.status, Receipt.Status.FAILED)
+        self.assertEqual(receipt.raw_text, "RAW TEXT")
+        self.assertEqual(receipt.extracted["store_name"], "")

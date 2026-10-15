@@ -6,6 +6,9 @@ from openai import OpenAI
 TIMEOUT = 30
 MAX_RETRIES = 2
 
+# Setting value that leaves the reasoning parameter out, for models without reasoning.
+REASONING_OFF = "off"
+
 _client = None
 
 
@@ -15,3 +18,16 @@ def get_client() -> OpenAI:
     if _client is None:
         _client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=TIMEOUT, max_retries=MAX_RETRIES)
     return _client
+
+
+def reasoning_options(api: str, effort: str) -> dict:
+    """The reasoning-effort argument for one OpenAI call, or {} when effort is "off".
+
+    Chat Completions takes reasoning_effort="low"; the Responses API takes
+    reasoning={"effort": "low"} (both checked against the installed openai SDK).
+    """
+    if not effort or effort == REASONING_OFF:
+        return {}
+    if api == "chat":
+        return {"reasoning_effort": effort}
+    return {"reasoning": {"effort": effort}}
