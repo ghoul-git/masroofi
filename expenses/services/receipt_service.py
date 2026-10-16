@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from expenses.ai import redaction
 from expenses.models import AIUsage, Expense, Receipt
+from expenses.models.receipt import random_image_name
 from expenses.repositories import category_repository, expense_repository, receipt_repository
 from expenses.services import review_checks, usage_service
 from expenses.services.expense_service import clean_expense_data
@@ -112,7 +113,11 @@ def _review(fields: dict, raw_text: str) -> dict:
 
 
 def queue_receipt(user, image_file) -> QueuedReceipt:
-    """Save the image as a queued receipt for the process_receipts worker. No OCR or OpenAI call here.
+    """Save the image in the database as a queued receipt for the process_receipts worker.
+    No OCR or OpenAI call here, and nothing is written to disk.
+
+    image_file is a validated upload (ReceiptUploadSerializer): Pillow has read it, and its
+    content_type comes from the image format Pillow found, not from the browser.
 
     Raises LimitReached, before the image is saved, when a usage limit has been
     reached. The receipt counts towards the limits from now on (one AIUsage row,
@@ -120,7 +125,13 @@ def queue_receipt(user, image_file) -> QueuedReceipt:
     """
     usage_service.check_receipt_allowed(user)
     with transaction.atomic():
-        receipt = receipt_repository.create(user, image_file)
+        image_file.seek(0)
+        receipt = receipt_repository.create(
+            user,
+            image_data=image_file.read(),
+            content_type=(getattr(image_file, "content_type", None) or "application/octet-stream")[:50],
+            name=random_image_name(image_file.name or ""),
+        )
         usage_service.record(user, AIUsage.Kind.RECEIPT, receipt=receipt)
     return QueuedReceipt(receipt=receipt, usage=usage_service.receipt_usage(user))
 
@@ -154,7 +165,9 @@ def process_claimed_receipt(receipt) -> str:
 
     raw_text, confidence, fields, tokens, warnings = "", 0.0, _empty_fields(), None, {}
     try:
-        image = preprocess(receipt.image.path)
+        if not receipt.image_data:
+            raise ValueError("The receipt has no image.")
+        image = preprocess(bytes(receipt.image_data))
         raw_text, confidence = read_text(image)
         raw_text = redaction.redact(raw_text)
         if not raw_text.strip():
@@ -192,11 +205,25 @@ def get_receipt(user, receipt_id) -> Receipt:
     return receipt
 
 
+@dataclass
+class ReceiptImage:
+    data: bytes
+    content_type: str
+
+
+def get_receipt_image(user, receipt_id) -> ReceiptImage:
+    """The user's own receipt image. Raises Receipt.DoesNotExist if there is none."""
+    receipt = receipt_repository.get_with_image(user, receipt_id)
+    if receipt is None or not receipt.image_data:
+        raise Receipt.DoesNotExist("Receipt image not found.")
+    return ReceiptImage(bytes(receipt.image_data), receipt.image_content_type or "application/octet-stream")
+
+
 def confirm_receipt(user, receipt_id, data) -> Expense:
     """Save the reviewed fields as an Expense with its Items and confirm the receipt.
 
-    The image is no longer needed once the expense is saved, so its file is deleted
-    and the field cleared (data minimization); the extracted data stays.
+    The image is no longer needed once the expense is saved, so it is removed from
+    the database (data minimization); the extracted data stays.
     """
     with transaction.atomic():
         receipt = receipt_repository.get_for_update(user, receipt_id)
@@ -207,16 +234,9 @@ def confirm_receipt(user, receipt_id, data) -> Expense:
 
         fields, items = clean_expense_data(data)
         expense = expense_repository.create(user, receipt=receipt, items=items, **fields)
-        receipt_repository.update(user, receipt.pk, status=Receipt.Status.CONFIRMED, image="")
-        _delete_image_after_commit(receipt.image)
+        receipt_repository.update(user, receipt.pk, status=Receipt.Status.CONFIRMED,
+                                  **receipt_repository.CLEARED_IMAGE)
     return expense
-
-
-def _delete_image_after_commit(image) -> None:
-    """Delete the file only once the transaction commits, so a rollback never loses an image."""
-    if image:
-        storage, name = image.storage, image.name
-        transaction.on_commit(lambda: storage.delete(name))
 
 
 def redaction_plan() -> RedactionPlan:
@@ -227,14 +247,12 @@ def redaction_plan() -> RedactionPlan:
         redacted = redaction.redact(receipt.raw_text)
         if redacted != receipt.raw_text:
             plan.texts[receipt.pk] = redacted
-    plan.image_receipt_ids = [r.pk for r in receipt_repository.confirmed_with_image()]
+    plan.image_receipt_ids = receipt_repository.confirmed_with_image_ids()
     return plan
 
 
 def apply_redaction_plan(plan: RedactionPlan) -> None:
     for receipt_id, text in plan.texts.items():
         receipt_repository.update_by_id(receipt_id, raw_text=text)
-    for receipt in receipt_repository.confirmed_with_image().filter(pk__in=plan.image_receipt_ids):
-        with transaction.atomic():
-            receipt_repository.update_by_id(receipt.pk, image="")
-            _delete_image_after_commit(receipt.image)
+    for receipt_id in plan.image_receipt_ids:
+        receipt_repository.clear_image(receipt_id)

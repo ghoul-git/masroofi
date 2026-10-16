@@ -1,5 +1,5 @@
 from django.contrib.auth.decorators import login_required
-from django.http import FileResponse, Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from rest_framework import status
 from rest_framework.parsers import JSONParser, MultiPartParser
@@ -51,12 +51,14 @@ def upload_page(request):
 
 @login_required
 def receipt_image(request, receipt_id):
-    """Serve a receipt image to its owner only. Anyone else gets 404, as if it did not exist."""
+    """Serve a receipt image to its owner only. Anyone else gets 404, as if it did not exist,
+    and so does a receipt whose image has been removed (confirmed receipts)."""
     try:
-        receipt = receipt_service.get_receipt(request.user, receipt_id)
-        image = receipt.image.open("rb")
-    except (Receipt.DoesNotExist, FileNotFoundError, ValueError):
+        image = receipt_service.get_receipt_image(request.user, receipt_id)
+    except Receipt.DoesNotExist:
         raise Http404("Receipt image not found.")
-    response = FileResponse(image)
+    response = HttpResponse(image.data, content_type=image.content_type)
     response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Content-Disposition"] = "inline"
     return response

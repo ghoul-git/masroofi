@@ -45,7 +45,7 @@ The project combines three areas of AI: **computer vision** (OpenCV image prepro
 
 - **Consent before any processing.** Registration requires three unticked boxes: the Terms of Service, the processing of receipt and expense data as described in the Privacy Policy (including sending receipt text to an AI provider outside Jordan), and confirming the user is 18 or older. Each acceptance is saved as a `ConsentRecord` with the Terms and Privacy versions.
 - **New versions need new consent.** When `TERMS_VERSION` or `PRIVACY_VERSION` changes, every user is sent to `/consent/` after login until they accept again. Users who registered before consent existed are treated the same way.
-- **Access and erasure.** On `/account/` a user can download all their data as JSON, or delete their account. Deleting needs the current password and removes every row and every receipt image file. Withdrawing consent leads to the same deletion, because without consent the data can no longer be processed.
+- **Access and erasure.** On `/account/` a user can download all their data as JSON, or delete their account. Deleting needs the current password and removes every row, receipt images included. Withdrawing consent leads to the same deletion, because without consent the data can no longer be processed.
 - **Data minimization.** Before OCR text is sent to OpenAI or saved, Jordanian phone numbers (mobiles such as 0796268159, landlines such as 06 5504142, and the +962 / 00962 forms) are replaced with `[PHONE]`, and the value of a "Customer name" / "اسم العميل" field with `[NAME]` (`expenses/ai/redaction.py`). Once a receipt is confirmed, its photo is deleted; the expense and the redacted text stay. `python manage.py redact_existing` applies both rules to receipts saved before they existed.
 
 ## 3. Technologies Used
@@ -101,7 +101,7 @@ masroofi/
     ├── models/                     Database tables, one file per model
     │   ├── user.py                 Custom user model (AUTH_USER_MODEL)
     │   ├── category.py             Expense categories, shared by all users, names unique regardless of case
-    │   ├── receipt.py              Uploaded image (receipts/<user id>/<random name>, deleted once confirmed), status
+    │   ├── receipt.py              Uploaded image (stored in the database, removed once confirmed), status
     │   │                           (queued, processing, extracted, failed, confirmed), redacted OCR text, extracted fields
     │   ├── expense.py              A confirmed expense: store, date, total, currency, category
     │   ├── item.py                 Line items of an expense
@@ -162,7 +162,6 @@ masroofi/
     │                               pagination and per-user data and image isolation
     ├── migrations/                 Database migrations (0002 creates the 7 default categories as data)
     ├── middleware.py               ConsentRequiredMiddleware: sends users without current consent to /consent/
-    ├── signals.py                  Deletes a receipt's image file whenever its Receipt row is deleted
     ├── evaluation/                 Scoring, dataset loaders and memory sampling for the evaluation commands
     ├── management/commands/        process_receipts (the worker), redact_existing, generate_icons,
     │                               evaluate_receipts, evaluate_agent and evaluation_report
@@ -170,7 +169,7 @@ masroofi/
     └── urls.py                     Page and API routes
 ```
 
-Files created at run time and kept out of Git: `.env` (secrets), `.venv/` (virtual environment), `media/` (uploaded receipt images) and `staticfiles/` (output of `collectstatic`). Receipt images are never served from a public URL: `/receipts/<id>/image/` returns an image only to the user who uploaded it.
+Files created at run time and kept out of Git: `.env` (secrets), `.venv/` (virtual environment) and `staticfiles/` (output of `collectstatic`). Receipt images are stored in the database (`Receipt.image_data`), not on disk, and are never served from a public URL: `/receipts/<id>/image/` returns an image only to the user who uploaded it. Versions before migration 0012 saved them in `media/`; migration 0011 copies those files into the database, after which the `media/` folder can be deleted.
 
 ## 5. How to Run the Project
 
@@ -337,7 +336,7 @@ Before starting the app:
 5. Serve `config.wsgi:application` with a production WSGI server, not `runserver`: gunicorn is in `requirements.txt` (Linux and macOS only). The Docker image does all of this; see [Deployment](#deployment).
 6. Run `python manage.py process_receipts` as a second, always-running process (for example a systemd service or a hosting platform's worker process). It stops cleanly on Ctrl+C or SIGTERM.
 
-Receipt images (`MEDIA_ROOT`, `media/` by default) must be on a disk that persists between deploys.
+Receipt images are stored in the database, so the server needs no persistent disk of its own.
 
 ## 6. Environment Variables
 
@@ -358,7 +357,6 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | `DB_HOST` | No (defaults to `localhost`) | Host where PostgreSQL runs. |
 | `DB_PORT` | No (defaults to `5432`) | Port PostgreSQL listens on. |
 | `DATABASE_URL` | No | The whole database connection as one URL, `postgres://user:password@host:5432/name`, as most hosting providers give it. When set, it is used instead of the `DB_*` variables. Options can follow, such as `?sslmode=require`. |
-| `MEDIA_ROOT` | No (defaults to `media/` in the project) | Folder for uploaded receipt images. In production, a persistent disk shared by the web server and the worker. |
 | `OPENAI_API_KEY` | Yes, for receipts and chat | OpenAI API key used for receipt field extraction and the chat assistant. |
 | `OPENAI_MODEL` | Yes, for receipts and chat | Name of the OpenAI model used for both receipt field extraction and the chat assistant. |
 | `FREE_RECEIPTS_PER_MONTH` | No (defaults to `30`) | Receipts each user can process per calendar month (Jordan time). Staff users have no limit. |
@@ -387,11 +385,10 @@ The `Dockerfile` builds one image (Python 3.11, CPU-only PyTorch, the EasyOCR Ar
 **Environment variables.** Set on both services:
 
 - Required: `SECRET_KEY` (a new random value, never the development one), `DATABASE_URL` (or the `DB_*` variables), `OPENAI_API_KEY`, `OPENAI_MODEL`, `ALLOWED_HOSTS` (your domain) and `CSRF_TRUSTED_ORIGINS` (`https://` plus your domain).
-- `MEDIA_ROOT`: the mount path of the persistent disk, for example `/data/media`.
 - `DEBUG` stays unset or `False`.
 - The rest are optional (see [Environment Variables](#6-environment-variables)); give both services the same values.
 
-**Persistent disk for receipt images.** Uploaded images are written by the web service and read by the worker, so both must mount the same persistent disk at `MEDIA_ROOT`. Without one, images are lost on every deploy or restart, and the worker cannot see what the web service saved. If the host cannot share one disk between two services, run both processes on one server (for example with `docker-compose.yml`). A confirmed receipt's image is deleted, so the disk only holds receipts waiting for review.
+**No disk needed.** Receipt images are stored in PostgreSQL, so the web service and the worker share them through the database and neither needs a persistent disk; they can run on separate servers. An image is removed once its receipt is confirmed, so the database only holds the images of receipts waiting for review (at most 10 MB each).
 
 **Memory.** The server needs at least **4 GB of RAM**. The worker uses about 850 MB once the OCR model is loaded and peaks around 2.3 GB while reading a receipt (measured in the [Evaluation](#evaluation)), and the web service with 2 gunicorn workers needs a few hundred MB more. With less, the worker is killed for running out of memory and receipts are stuck in `processing` until it restarts.
 
@@ -407,7 +404,7 @@ If the host has no interactive shell, set `DJANGO_SUPERUSER_USERNAME`, `DJANGO_S
 
 **Existing receipts.** After the first deploy with data copied from an older version, run `python manage.py redact_existing` once on the web service.
 
-**Running it all locally in Docker.** With Docker installed, `docker compose up --build` starts PostgreSQL 17 (data in the `postgres-data` volume), the web service on http://localhost:8000 and the worker, which share the `media` volume. It reads `.env`; `DB_NAME`, `DB_USER` and `DB_PASSWORD` also create the database. The worker starts once the web service has run the migrations and `/healthz` answers, so with `DEBUG=False`, `ALLOWED_HOSTS` must include `localhost`.
+**Running it all locally in Docker.** With Docker installed, `docker compose up --build` starts PostgreSQL 17 (data in the `postgres-data` volume), the web service on http://localhost:8000 and the worker. It reads `.env`; `DB_NAME`, `DB_USER` and `DB_PASSWORD` also create the database. The worker starts once the web service has run the migrations and `/healthz` answers, so with `DEBUG=False`, `ALLOWED_HOSTS` must include `localhost`.
 
 ## API Endpoints
 
@@ -428,7 +425,7 @@ The two endpoints that lead to OpenAI calls (receipt upload and chat) check the 
 
 Another user's receipt or expense id returns `404`, the same as an id that does not exist.
 
-Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/image/` returns the image file to its owner. A logged-out request is redirected to the login page, and anyone else gets `404`, as does a confirmed receipt, whose image has been deleted.
+Receipt images have one more route, outside the JSON API: `GET /receipts/<id>/image/` returns the image to its owner, with the content type Pillow detected at upload. A logged-out request is redirected to the login page, and anyone else gets `404`, as does a confirmed receipt, whose image has been removed. No API response, data download or admin page contains the image itself; the admin shows only its size.
 
 The web app files are public and have no user data: `/manifest.webmanifest`, `/sw.js` (the service worker; it must be at the root to control every page) and `/offline/`. The service worker caches only static files (CSS, JavaScript, icons) and the offline page. Pages, `/api/`, `/admin/`, `/account/` and receipt images always go to the network and are never cached.
 
@@ -462,7 +459,7 @@ python manage.py evaluation_report                              # writes evaluat
 
 ## Known Limitations
 
-- **Images on the local disk.** Uploaded receipt images are stored in `media/` on the server (served only to their owner, through Django) until the receipt is confirmed, so a deployment needs a persistent disk shared by the web server and the worker. There is no cloud storage option.
+- **Images in the database.** Receipt images (up to 10 MB each) are stored in PostgreSQL until the receipt is confirmed. This keeps deployment simple but makes the database and its backups larger while many receipts wait for review, and each image is read in full into memory to be served. There is no object storage option.
 - **Limits are counted, not locked.** Two requests sent at exactly the same moment can both pass the limit check, so a user or the global cap can go slightly over the limit. Every receipt uploaded counts, including ones that could not be read.
 - **The worker must be running.** Receipts are only read while `process_receipts` runs. Each worker reads one receipt at a time, so at busy times receipts wait in the queue; more workers help, but each loads its own copy of the OCR model (about 850 MB of memory, peaking above 2 GB while reading a receipt, as measured in the evaluation). The queue is a database table polled every 2 seconds, not a message broker.
 - **Redaction is rule-based.** Only Jordanian phone number formats and a field labelled "Customer name" / "اسم العميل" are redacted. Other personal details on a receipt (an email address, a customer name under another label, a card holder's name) are still sent to OpenAI, and an OCR misread of a number can stop it being recognised.
@@ -475,8 +472,8 @@ python manage.py evaluation_report                              # writes evaluat
 - **Legal pages are placeholders.** `/terms/` and `/privacy/` only say "Content coming soon". Real texts, reviewed by a lawyer against Jordan's Personal Data Protection Law, are needed before launch, and the consent flow alone is not legal advice.
 - **Age is self-declared.** The 18+ box is not verified.
 - **Consent is all or nothing.** Withdrawing consent means deleting the account; there is no way to keep the account while stopping only the AI processing.
-- **Deletion limits.** Deleting an account removes the data from the database and the receipt images from disk, but not from database backups, and not text already sent to OpenAI, which keeps it according to its own retention policy. Empty `media/receipts/<user id>/` folders are left behind.
-- **The data download has no images.** The JSON includes the redacted text read from each receipt and the image file name (empty once confirmed), but not the image files themselves.
+- **Deletion limits.** Deleting an account removes the data, receipt images included, from the database, but not from database backups, and not text already sent to OpenAI, which keeps it according to its own retention policy.
+- **The data download has no images.** The JSON includes the redacted text read from each receipt and whether its image is still stored, but not the images themselves.
 - **Short chat memory.** The assistant only sees the last 10 messages of the conversation.
 - **Review checks are simple rules.** The biller is found only when the OCR text has a label such as "Biller" or "مزود الخدمة" next to it, and a new payment platform must be added to `PAYMENT_PLATFORMS` before it is recognised. A date that is wrong but within the last year is not flagged.
 - **Item editing is limited.** Items can be edited on the review form before saving, but the expenses page only edits the main fields. The API supports replacing items.

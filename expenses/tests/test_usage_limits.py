@@ -1,7 +1,6 @@
 import datetime
 import io
 import os
-import tempfile
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -39,7 +38,7 @@ def image():
     return SimpleUploadedFile("receipt.png", buffer.getvalue(), content_type="image/png")
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp(), FREE_RECEIPTS_PER_MONTH=3, GLOBAL_DAILY_AI_CALLS=1000)
+@override_settings(FREE_RECEIPTS_PER_MONTH=3, GLOBAL_DAILY_AI_CALLS=1000)
 class ReceiptLimitTests(TestCase):
     def setUp(self):
         self.user = make_user()
@@ -152,7 +151,7 @@ class ChatLimitTests(TestCase):
         self.assertNotIn('id="limit-notice" hidden', html)
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp(), GLOBAL_DAILY_AI_CALLS=3, FREE_RECEIPTS_PER_MONTH=30, FREE_CHAT_PER_DAY=20)
+@override_settings(GLOBAL_DAILY_AI_CALLS=3, FREE_RECEIPTS_PER_MONTH=30, FREE_CHAT_PER_DAY=20)
 @mock.patch.dict(os.environ, {"OPENAI_MODEL": "test-model"})
 class GlobalCapTests(TestCase):
     def setUp(self):
@@ -188,7 +187,7 @@ class GlobalCapTests(TestCase):
         self.assertIn("try again tomorrow", response.json()["detail"])
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp(), FREE_RECEIPTS_PER_MONTH=1, FREE_CHAT_PER_DAY=1, GLOBAL_DAILY_AI_CALLS=1000)
+@override_settings(FREE_RECEIPTS_PER_MONTH=1, FREE_CHAT_PER_DAY=1, GLOBAL_DAILY_AI_CALLS=1000)
 @mock.patch.dict(os.environ, {"OPENAI_MODEL": "test-model"})
 class StaffExemptionTests(TestCase):
     def setUp(self):
@@ -215,7 +214,6 @@ class StaffExemptionTests(TestCase):
             usage_service.check_chat_allowed(user)
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 @mock.patch.dict(os.environ, {"OPENAI_MODEL": "test-model"})
 class UsageRecordingTests(TestCase):
     def setUp(self):

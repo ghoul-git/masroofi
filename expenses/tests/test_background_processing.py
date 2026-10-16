@@ -2,26 +2,22 @@
 import datetime
 import io
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 from unittest import mock
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 from PIL import Image
 
 from expenses.models import AIUsage, Receipt
+from expenses.repositories import receipt_repository
 from expenses.services import receipt_service
 from expenses.tests.factories import make_category, make_receipt, make_user
 from expenses.tests.fakes import MockedReceiptAI, process_next_receipt
-
-MEDIA_ROOT = tempfile.mkdtemp()
-
 
 def image():
     buffer = io.BytesIO()
@@ -37,13 +33,7 @@ def run_worker(**options):
     return out.getvalue(), get_reader
 
 
-@override_settings(MEDIA_ROOT=MEDIA_ROOT)
 class UploadApiTests(TestCase):
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        shutil.rmtree(MEDIA_ROOT, ignore_errors=True)
-
     def setUp(self):
         self.user = make_user()
         self.client.force_login(self.user)
@@ -59,7 +49,7 @@ class UploadApiTests(TestCase):
         self.assertEqual(body["status"], "queued")
         self.assertEqual(body["usage"]["used"], 1)
         self.assertEqual(receipt.status, Receipt.Status.QUEUED)
-        self.assertTrue(receipt.image)
+        self.assertTrue(receipt.image_data)
         ai.assert_nothing_called(self)
         openai_class.assert_not_called()
 
@@ -110,7 +100,6 @@ class UploadApiTests(TestCase):
         self.assertEqual(self.client.get(f"/api/receipts/{receipt.pk}/").status_code, 403)
 
 
-@override_settings(MEDIA_ROOT=MEDIA_ROOT)
 class WorkerTests(TestCase):
     def setUp(self):
         self.user = make_user()
@@ -204,6 +193,27 @@ class WorkerTests(TestCase):
         receipt.refresh_from_db()
         self.assertEqual(receipt.status, Receipt.Status.CONFIRMED)
         self.assertEqual(receipt.extracted, {})
+
+    def test_worker_reads_the_image_from_the_database(self):
+        receipt, = self.queue()
+        with MockedReceiptAI() as ai:
+            process_next_receipt()
+        ai.preprocess.assert_called_once_with(bytes(Receipt.objects.get(pk=receipt.pk).image_data))
+
+    def test_receipt_without_an_image_fails_without_any_ai_call(self):
+        receipt, = self.queue()
+        Receipt.objects.filter(pk=receipt.pk).update(image_data=None)
+        with MockedReceiptAI() as ai, self.assertLogs("expenses.services.receipt_service", "ERROR"):
+            self.assertEqual(process_next_receipt().status, Receipt.Status.FAILED)
+        ai.assert_nothing_called(self)
+
+    def test_status_polling_does_not_load_the_image(self):
+        receipt, = self.queue()
+        self.client.force_login(self.user)
+        with mock.patch("expenses.repositories.receipt_repository._without_image",
+                        wraps=receipt_repository._without_image) as without_image:
+            self.client.get(f"/api/receipts/{receipt.pk}/")
+        without_image.assert_called()
 
     def test_ocr_text_is_redacted_before_openai_and_storage(self):
         self.queue()

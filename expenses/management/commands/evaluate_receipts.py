@@ -103,7 +103,7 @@ class Command(BaseCommand):
         row["rss_before_mb"] = rss_mb()
         try:
             with Stage(sampler) as stage:
-                image = preprocess(str(receipt["image_path"]))
+                image = preprocess(receipt["image_path"].read_bytes())
             row.update(preprocess_s=stage.seconds, rss_after_preprocess_mb=stage.rss_after, peak_preprocess_mb=stage.peak)
 
             with Stage(sampler) as stage:

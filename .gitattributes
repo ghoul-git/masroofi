@@ -1,0 +1,5 @@
+# Files used on Linux servers must keep Unix line endings, even when edited on Windows.
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf
+.dockerignore text eol=lf

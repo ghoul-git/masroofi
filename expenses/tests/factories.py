@@ -24,9 +24,15 @@ def make_category(name="food"):
     return Category.objects.get_or_create(name__iexact=name, defaults={"name": name})[0]
 
 
-def make_receipt(user, status=Receipt.Status.EXTRACTED):
-    # The image path is never opened by these tests, so no real file is needed.
-    return Receipt.objects.create(user=user, image="receipts/test.jpg", status=status)
+IMAGE_BYTES = b"\xff\xd8\xff\xe0 fake jpeg bytes"
+
+
+def make_receipt(user, status=Receipt.Status.EXTRACTED, image_data=IMAGE_BYTES):
+    """A receipt with an image stored in the database (pass image_data=None for none)."""
+    return Receipt.objects.create(
+        user=user, status=status, image_data=image_data,
+        image_content_type="image/jpeg" if image_data else "", image_name="0123abcd.jpg" if image_data else "",
+    )
 
 
 def make_expense(user, category, store_name="Carrefour", total="10.00", date="2026-10-01", currency="JOD"):

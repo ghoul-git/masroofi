@@ -174,10 +174,8 @@ STORAGES = {
     },
 }
 
-MEDIA_URL = "/media/"
-# Uploaded receipt images. In production, point this at a persistent disk shared by the web
-# server and the worker, e.g. MEDIA_ROOT=/data/media.
-MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "").strip() or BASE_DIR / "media")
+# Receipt images are stored in the database (Receipt.image_data), not in MEDIA_ROOT, so the web
+# server and the worker need no shared disk.
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "home"

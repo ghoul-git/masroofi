@@ -1,17 +1,30 @@
 from expenses.models import Receipt
 
+# The image bytes (up to 10 MB) are only loaded where they are needed: by the image
+# view and the worker. Every other query leaves them out.
+CLEARED_IMAGE = {"image_data": None, "image_content_type": "", "image_name": ""}
 
-def create(user, image) -> Receipt:
-    return Receipt.objects.create(user=user, image=image, status=Receipt.Status.QUEUED)
+
+def _without_image():
+    return Receipt.objects.defer("image_data")
+
+
+def create(user, image_data, content_type, name) -> Receipt:
+    return Receipt.objects.create(user=user, image_data=image_data, image_content_type=content_type,
+                                  image_name=name, status=Receipt.Status.QUEUED)
 
 
 def get(user, receipt_id) -> Receipt | None:
+    return _without_image().filter(user=user, pk=receipt_id).first()
+
+
+def get_with_image(user, receipt_id) -> Receipt | None:
     return Receipt.objects.filter(user=user, pk=receipt_id).first()
 
 
 def get_for_update(user, receipt_id) -> Receipt | None:
     """Lock the receipt row until the surrounding transaction ends."""
-    return Receipt.objects.select_for_update().filter(user=user, pk=receipt_id).first()
+    return _without_image().select_for_update().filter(user=user, pk=receipt_id).first()
 
 
 def update(user, receipt_id, **fields) -> int:
@@ -19,7 +32,7 @@ def update(user, receipt_id, **fields) -> int:
 
 
 def list_for_user(user):
-    return Receipt.objects.filter(user=user).order_by("uploaded_at", "id")
+    return _without_image().filter(user=user).order_by("uploaded_at", "id")
 
 
 # For the process_receipts worker and the redact_existing command, which work across users.
@@ -51,5 +64,10 @@ def with_raw_text():
     return Receipt.objects.exclude(raw_text="").only("id", "raw_text").order_by("id")
 
 
-def confirmed_with_image():
-    return Receipt.objects.filter(status=Receipt.Status.CONFIRMED).exclude(image="").only("id", "image").order_by("id")
+def clear_image(receipt_id) -> int:
+    return Receipt.objects.filter(pk=receipt_id).update(**CLEARED_IMAGE)
+
+
+def confirmed_with_image_ids() -> list[int]:
+    return list(Receipt.objects.filter(status=Receipt.Status.CONFIRMED, image_data__isnull=False)
+                .order_by("id").values_list("id", flat=True))

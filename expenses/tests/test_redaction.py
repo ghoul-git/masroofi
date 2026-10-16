@@ -1,20 +1,14 @@
 """Data minimization: redacting OCR text, deleting images of confirmed receipts, redact_existing."""
 import io
-import os
-import shutil
-import tempfile
 from unittest import mock
 
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TestCase
 
 from expenses.ai.redaction import NAME, PHONE, redact
 from expenses.models import Expense, Receipt
 from expenses.services import receipt_service
-from expenses.tests.factories import make_category, make_receipt, make_user
-
-MEDIA_ROOT = tempfile.mkdtemp()
+from expenses.tests.factories import IMAGE_BYTES, make_category, make_receipt, make_user
 
 
 class PhoneRedactionTests(SimpleTestCase):
@@ -72,53 +66,37 @@ class CustomerNameRedactionTests(SimpleTestCase):
         self.assertEqual(redact(""), "")
 
 
-@override_settings(MEDIA_ROOT=MEDIA_ROOT)
-class ConfirmDeletesImageTests(TestCase):
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        shutil.rmtree(MEDIA_ROOT, ignore_errors=True)
-
+class ConfirmRemovesImageTests(TestCase):
     def setUp(self):
         self.user = make_user()
         self.client.force_login(self.user)
-        self.receipt = Receipt.objects.create(
-            user=self.user, status=Receipt.Status.EXTRACTED, raw_text="Cozmo [PHONE]",
-            extracted={"store_name": "Cozmo"},
-            image=SimpleUploadedFile("receipt.jpg", b"\xff\xd8 fake jpeg", content_type="image/jpeg"),
-        )
-        self.path = self.receipt.image.path
+        self.receipt = make_receipt(self.user)
+        Receipt.objects.filter(pk=self.receipt.pk).update(raw_text="Cozmo [PHONE]", extracted={"store_name": "Cozmo"})
 
-    def confirm(self):
-        return self.client.post(f"/api/receipts/{self.receipt.pk}/confirm/", {
+    def confirm(self, **data):
+        return self.client.post(f"/api/receipts/{self.receipt.pk}/confirm/", data or {
             "store_name": "Cozmo", "date": "2026-10-01", "total": "5", "category": make_category("food").pk,
         }, content_type="application/json")
 
-    def test_confirming_deletes_the_image_file_and_clears_the_field(self):
-        self.assertTrue(os.path.exists(self.path))
-        with self.captureOnCommitCallbacks(execute=True):
-            response = self.confirm()
+    def test_confirming_clears_the_image_and_keeps_the_extracted_data(self):
+        response = self.confirm()
         self.assertEqual(response.status_code, 201)
         self.receipt.refresh_from_db()
-        self.assertEqual(self.receipt.image.name, "")
-        self.assertFalse(os.path.exists(self.path))
-        # The extracted data stays.
+        self.assertIsNone(self.receipt.image_data)
+        self.assertEqual((self.receipt.image_content_type, self.receipt.image_name), ("", ""))
         self.assertEqual(self.receipt.raw_text, "Cozmo [PHONE]")
         self.assertEqual(self.receipt.extracted, {"store_name": "Cozmo"})
         self.assertEqual(Expense.objects.get().receipt, self.receipt)
         self.assertEqual(self.client.get(f"/receipts/{self.receipt.pk}/image/").status_code, 404)
 
     def test_failed_confirmation_keeps_the_image(self):
-        with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post(f"/api/receipts/{self.receipt.pk}/confirm/", {"total": "-1"},
-                                        content_type="application/json")
+        response = self.confirm(total="-1")
         self.assertEqual(response.status_code, 400)
         self.receipt.refresh_from_db()
-        self.assertTrue(self.receipt.image)
-        self.assertTrue(os.path.exists(self.path))
+        self.assertEqual(bytes(self.receipt.image_data), IMAGE_BYTES)
+        self.assertEqual(self.receipt.image_content_type, "image/jpeg")
 
 
-@override_settings(MEDIA_ROOT=MEDIA_ROOT)
 class RedactExistingCommandTests(TestCase):
     def setUp(self):
         user = make_user()
@@ -126,19 +104,12 @@ class RedactExistingCommandTests(TestCase):
         Receipt.objects.filter(pk=self.with_phone.pk).update(raw_text="Cozmo\nTel 0796268159\nTotal 5.000")
         self.clean = make_receipt(user)
         Receipt.objects.filter(pk=self.clean.pk).update(raw_text="Cozmo\nTotal 5.000")
-        self.confirmed = Receipt.objects.create(
-            user=user, status=Receipt.Status.CONFIRMED,
-            image=SimpleUploadedFile("old.jpg", b"\xff\xd8 fake jpeg", content_type="image/jpeg"),
-        )
-        self.waiting = Receipt.objects.create(
-            user=user, status=Receipt.Status.EXTRACTED,
-            image=SimpleUploadedFile("new.jpg", b"\xff\xd8 fake jpeg", content_type="image/jpeg"),
-        )
+        self.confirmed = make_receipt(user, status=Receipt.Status.CONFIRMED)  # saved before images were removed
+        self.waiting = make_receipt(user, status=Receipt.Status.EXTRACTED)
 
     def run_command(self, *args, answer=None):
         out = io.StringIO()
-        with mock.patch("builtins.input", return_value=answer) as prompt, \
-                self.captureOnCommitCallbacks(execute=True):
+        with mock.patch("builtins.input", return_value=answer) as prompt:
             call_command("redact_existing", *args, stdout=out)
         return out.getvalue(), prompt
 
@@ -151,22 +122,19 @@ class RedactExistingCommandTests(TestCase):
         self.with_phone.refresh_from_db()
         self.confirmed.refresh_from_db()
         self.assertIn("0796268159", self.with_phone.raw_text)
-        self.assertTrue(os.path.exists(self.confirmed.image.path))
+        self.assertIsNotNone(self.confirmed.image_data)
 
-    def test_yes_redacts_text_and_deletes_only_confirmed_receipts_images(self):
-        path = self.confirmed.image.path
+    def test_yes_redacts_text_and_removes_only_confirmed_receipts_images(self):
         output, prompt = self.run_command("--yes")
         prompt.assert_not_called()
         self.assertIn("Redacted the text of 1 receipt(s) and deleted 1 image(s).", output)
-        self.with_phone.refresh_from_db()
-        self.clean.refresh_from_db()
-        self.confirmed.refresh_from_db()
-        self.waiting.refresh_from_db()
+        for receipt in (self.with_phone, self.clean, self.confirmed, self.waiting):
+            receipt.refresh_from_db()
         self.assertEqual(self.with_phone.raw_text, "Cozmo\nTel [PHONE]\nTotal 5.000")
         self.assertEqual(self.clean.raw_text, "Cozmo\nTotal 5.000")
-        self.assertEqual(self.confirmed.image.name, "")
-        self.assertFalse(os.path.exists(path))
-        self.assertTrue(os.path.exists(self.waiting.image.path))  # not confirmed yet: still needed
+        self.assertIsNone(self.confirmed.image_data)
+        self.assertEqual((self.confirmed.image_content_type, self.confirmed.image_name), ("", ""))
+        self.assertEqual(bytes(self.waiting.image_data), IMAGE_BYTES)  # not confirmed yet: still needed
 
     def test_answering_yes_applies_and_a_second_run_has_nothing_to_do(self):
         self.run_command(answer="y")

@@ -1,49 +1,41 @@
 import json
-import shutil
-import tempfile
 
 from django.contrib.auth import get_user_model
-from django.core.files.storage import default_storage
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import transaction
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from expenses.models import AIUsage, ChatMessage, ConsentRecord, Expense, Item, Receipt
-from expenses.tests.factories import PASSWORD, make_category, make_expense, make_user
+from expenses.tests.factories import IMAGE_BYTES, PASSWORD, make_category, make_expense, make_receipt, make_user
 
 User = get_user_model()
-MEDIA_ROOT = tempfile.mkdtemp()
 
 
-def make_receipt_with_file(user, raw_text="RAW"):
-    return Receipt.objects.create(
-        user=user,
-        image=SimpleUploadedFile("receipt.jpg", b"image bytes", content_type="image/jpeg"),
-        raw_text=raw_text,
-        status=Receipt.Status.CONFIRMED,
-    )
+def make_receipt_with_image(user, raw_text="RAW"):
+    receipt = make_receipt(user)
+    Receipt.objects.filter(pk=receipt.pk).update(raw_text=raw_text)
+    return receipt
+
+
+def images_stored(user_id) -> int:
+    return Receipt.objects.filter(user_id=user_id, image_data__isnull=False).count()
 
 
 class UserDataMixin:
-    """Alice and Bob each have a receipt (with an image file), an expense with items, chat and usage rows."""
+    """Alice and Bob each have a receipt (with its image), an expense with items, chat and usage rows."""
 
     def setUp(self):
         food = make_category("food")
         self.alice = make_user("alice")
         self.bob = make_user("bob")
         for user, store in [(self.alice, "Alice Market"), (self.bob, "Bob Market")]:
-            receipt = make_receipt_with_file(user, raw_text=f"{store} receipt text")
+            receipt = make_receipt_with_image(user, raw_text=f"{store} receipt text")
             expense = make_expense(user, food, store, total="12.50")
             Expense.objects.filter(pk=expense.pk).update(receipt=receipt)
             ChatMessage.objects.create(user=user, role="user", content=f"{store}: كم صرفت؟")
             ChatMessage.objects.create(user=user, role="assistant", content="12.50 JOD",
                                        tools_used=[{"name": "get_spending_total", "arguments": {}}])
             AIUsage.objects.create(user=user, kind="chat", input_tokens=300, output_tokens=20)
-        self.alice_image = Receipt.objects.get(user=self.alice).image.name
-        self.bob_image = Receipt.objects.get(user=self.bob).image.name
 
 
-@override_settings(MEDIA_ROOT=MEDIA_ROOT)
 class ExportTests(UserDataMixin, TestCase):
     def export(self):
         self.client.force_login(self.alice)
@@ -79,6 +71,14 @@ class ExportTests(UserDataMixin, TestCase):
         self.assertEqual((len(data["expenses"]), len(data["receipts"]), len(data["chat_messages"]),
                           len(data["ai_usage"]), len(data["consent_records"])), (1, 1, 2, 1, 1))
 
+    def test_export_never_contains_the_image(self):
+        response, data = self.export()
+        [receipt] = data["receipts"]
+        self.assertNotIn("image_data", receipt)
+        self.assertEqual((receipt["image_name"], receipt["image_stored"]), ("0123abcd.jpg", True))
+        self.assertNotIn(b"fake jpeg bytes", response.content)
+        self.assertNotIn(IMAGE_BYTES.hex(), response.content.decode())
+
     def test_arabic_is_kept_readable(self):
         response, _ = self.export()
         self.assertIn("كم صرفت؟", response.content.decode("utf-8"))
@@ -87,13 +87,7 @@ class ExportTests(UserDataMixin, TestCase):
         self.assertTrue(self.client.get("/account/export/")["Location"].startswith("/login/"))
 
 
-@override_settings(MEDIA_ROOT=MEDIA_ROOT)
 class DeleteAccountTests(UserDataMixin, TestCase):
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        shutil.rmtree(MEDIA_ROOT, ignore_errors=True)
-
     def counts(self, user_id):
         return {
             "user": User.objects.filter(pk=user_id).count(),
@@ -105,20 +99,19 @@ class DeleteAccountTests(UserDataMixin, TestCase):
             "consent": ConsentRecord.objects.filter(user_id=user_id).count(),
         }
 
-    def test_deleting_removes_every_row_and_file_and_logs_out(self):
+    def test_deleting_removes_every_row_and_image_and_logs_out(self):
         alice_id, bob_before = self.alice.pk, self.counts(self.bob.pk)
-        self.assertTrue(default_storage.exists(self.alice_image))
+        self.assertEqual(images_stored(alice_id), 1)
         self.client.force_login(self.alice)
 
-        with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post("/account/delete/", {"password": PASSWORD, "from": "account"})
+        response = self.client.post("/account/delete/", {"password": PASSWORD, "from": "account"})
 
         self.assertRedirects(response, "/account/deleted/")
         self.assertEqual(set(self.counts(alice_id).values()), {0})
-        self.assertFalse(default_storage.exists(self.alice_image))
+        self.assertEqual(images_stored(alice_id), 0)
         # Bob is untouched.
         self.assertEqual(self.counts(self.bob.pk), bob_before)
-        self.assertTrue(default_storage.exists(self.bob_image))
+        self.assertEqual(images_stored(self.bob.pk), 1)
         # Logged out, and the confirmation page is public.
         self.assertTrue(self.client.get("/account/")["Location"].startswith("/login/"))
         self.assertContains(self.client.get("/account/deleted/"), "Your account has been deleted")
@@ -126,12 +119,11 @@ class DeleteAccountTests(UserDataMixin, TestCase):
     def test_wrong_password_blocks_deletion(self):
         before = self.counts(self.alice.pk)
         self.client.force_login(self.alice)
-        with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post("/account/delete/", {"password": "wrong", "from": "account"})
+        response = self.client.post("/account/delete/", {"password": "wrong", "from": "account"})
         self.assertEqual(response.status_code, 400)
         self.assertContains(response, "The password is incorrect. Your account was not deleted.", status_code=400)
         self.assertEqual(self.counts(self.alice.pk), before)
-        self.assertTrue(default_storage.exists(self.alice_image))
+        self.assertEqual(images_stored(self.alice.pk), 1)
         self.assertEqual(self.client.get("/account/").status_code, 200)  # still logged in
 
     def test_empty_password_blocks_deletion(self):
@@ -151,8 +143,7 @@ class DeleteAccountTests(UserDataMixin, TestCase):
         self.assertContains(response, "your data can no longer be processed", status_code=400)
         self.assertContains(response, "The password is incorrect.", status_code=400)
 
-        with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post("/account/delete/", {"password": PASSWORD, "from": "withdraw"})
+        response = self.client.post("/account/delete/", {"password": PASSWORD, "from": "withdraw"})
         self.assertRedirects(response, "/account/deleted/")
         self.assertFalse(User.objects.filter(username="alice").exists())
 
@@ -166,46 +157,3 @@ class DeleteAccountTests(UserDataMixin, TestCase):
         for text in ["Download my data", 'href="/account/export/"', "Withdraw consent", 'href="/account/withdraw/"',
                      "Delete my account", 'name="password"', "Terms of Service version 1.0"]:
             self.assertIn(text, html)
-
-
-@override_settings(MEDIA_ROOT=MEDIA_ROOT)
-class ReceiptFileDeletionTests(TestCase):
-    def setUp(self):
-        self.user = make_user()
-        self.receipt = make_receipt_with_file(self.user)
-        self.name = self.receipt.image.name
-
-    def test_deleting_a_receipt_deletes_its_file(self):
-        with self.captureOnCommitCallbacks(execute=True):
-            self.receipt.delete()
-        self.assertFalse(default_storage.exists(self.name))
-
-    def test_queryset_delete_deletes_every_file(self):
-        other = make_receipt_with_file(self.user).image.name
-        with self.captureOnCommitCallbacks(execute=True):
-            Receipt.objects.filter(user=self.user).delete()
-        self.assertFalse(default_storage.exists(self.name))
-        self.assertFalse(default_storage.exists(other))
-
-    def test_deleting_the_user_cascades_to_the_file(self):
-        with self.captureOnCommitCallbacks(execute=True):
-            self.user.delete()
-        self.assertFalse(default_storage.exists(self.name))
-
-    def test_rolled_back_delete_keeps_the_file(self):
-        receipt_id = self.receipt.pk  # delete() sets the instance's pk to None
-        with self.captureOnCommitCallbacks(execute=True) as callbacks:
-            try:
-                with transaction.atomic():
-                    self.receipt.delete()
-                    raise RuntimeError("roll back")
-            except RuntimeError:
-                pass
-        self.assertEqual(callbacks, [])
-        self.assertTrue(default_storage.exists(self.name))
-        self.assertTrue(Receipt.objects.filter(pk=receipt_id).exists())
-
-    def test_receipt_without_a_file_is_fine(self):
-        receipt = Receipt.objects.create(user=self.user, image="")
-        with self.captureOnCommitCallbacks(execute=True):
-            receipt.delete()

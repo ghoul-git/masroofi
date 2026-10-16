@@ -1,7 +1,4 @@
-"""Deployment: DATABASE_URL, MEDIA_ROOT, the /healthz endpoint and the Docker files."""
-import os
-import subprocess
-import sys
+"""Deployment: DATABASE_URL, no media folder, the /healthz endpoint and the Docker files."""
 from pathlib import Path
 from unittest import mock
 
@@ -54,22 +51,18 @@ class DatabaseUrlTests(SimpleTestCase):
             database_from_env({"DB_USER": "app"})
 
 
-class MediaRootTests(SimpleTestCase):
-    def media_root_with(self, value):
-        env = {**os.environ, "MEDIA_ROOT": value}
-        env.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-        code = "import django; django.setup(); from django.conf import settings; print(settings.MEDIA_ROOT)"
-        result = subprocess.run([sys.executable, "-c", code], cwd=BASE_DIR, env=env,
-                                capture_output=True, text=True, timeout=120)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        return Path(result.stdout.strip().splitlines()[-1])
+class NoMediaFolderTests(SimpleTestCase):
+    """Receipt images live in the database, so nothing is configured to store files on disk."""
 
-    def test_media_root_comes_from_the_environment(self):
-        self.assertEqual(self.media_root_with(str(BASE_DIR / "persistent-disk" / "media")),
-                         BASE_DIR / "persistent-disk" / "media")
+    def test_no_media_settings(self):
+        settings_source = (BASE_DIR / "config" / "settings.py").read_text(encoding="utf-8")
+        self.assertNotRegex(settings_source, r"(?m)^MEDIA_(ROOT|URL)\s*=")
+        self.assertNotIn("MEDIA_ROOT", (BASE_DIR / ".env.example").read_text(encoding="utf-8"))
 
-    def test_media_root_defaults_to_media_in_the_project(self):
-        self.assertEqual(self.media_root_with(""), BASE_DIR / "media")
+    def test_docker_files_have_no_media_volume(self):
+        for name in ("Dockerfile", "docker-compose.yml"):
+            with self.subTest(name=name):
+                self.assertNotIn("media", (BASE_DIR / name).read_text(encoding="utf-8").lower())
 
 
 class HealthzTests(TestCase):
@@ -144,13 +137,13 @@ class DockerFilesTests(SimpleTestCase):
             with self.subTest(package=windows_only):
                 self.assertNotIn(windows_only, requirements.lower())
 
-    def test_compose_runs_the_worker_from_the_same_image_with_shared_media(self):
+    def test_compose_runs_the_worker_from_the_same_image(self):
         import yaml
 
         services = yaml.safe_load(self.read("docker-compose.yml"))["services"]
         self.assertEqual(services["db"]["image"], "postgres:17")
         self.assertEqual(services["worker"]["command"], "python manage.py process_receipts")
         self.assertEqual(services["web"]["image"], services["worker"]["image"])
-        self.assertIn("media:/app/media", services["web"]["volumes"])
-        self.assertIn("media:/app/media", services["worker"]["volumes"])
+        self.assertNotIn("volumes", services["web"])  # no shared disk: images are in the database
+        self.assertNotIn("volumes", services["worker"])
         self.assertEqual(services["web"]["env_file"], ".env")

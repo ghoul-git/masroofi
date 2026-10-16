@@ -9,7 +9,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # EasyOCR models are downloaded here during the build, not when the worker starts.
     EASYOCR_MODULE_PATH=/opt/easyocr \
-    MEDIA_ROOT=/app/media \
     PORT=8000
 
 # Shared libraries OpenCV needs, nothing else.
@@ -28,11 +27,11 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu \
         $(grep -E '^(torch|torchvision)==' requirements.txt | tr -d '\r') \
     && pip install -r requirements.txt
 
-# Run as a non-root user. The media folder must exist and belong to it, so a volume
-# mounted there is writable.
+# Run as a non-root user. Receipt images are stored in the database, so nothing is written
+# at run time; only the build writes the OCR models and the static files.
 RUN useradd --create-home --uid 1000 app \
-    && mkdir -p /opt/easyocr /app/media /app/staticfiles \
-    && chown app:app /opt/easyocr /app/media /app/staticfiles
+    && mkdir -p /opt/easyocr /app/staticfiles \
+    && chown app:app /opt/easyocr /app/staticfiles
 
 USER app
 

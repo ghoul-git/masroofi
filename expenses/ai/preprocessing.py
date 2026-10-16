@@ -3,15 +3,15 @@ import numpy as np
 from django.conf import settings
 
 
-def preprocess(image_path: str) -> np.ndarray:
-    """Clean a receipt photo so OCR reads it faster and more accurately.
+def preprocess(image_bytes: bytes) -> np.ndarray:
+    """Clean a receipt photo (the bytes of a JPEG, PNG, ... file) so OCR reads it faster and more accurately.
 
     Photos larger than settings.OCR_MAX_SIDE on their longest side are scaled down
     first: OCR time grows with the number of pixels. Smaller photos are not enlarged.
     """
-    image = cv2.imread(image_path)
+    image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
-        raise ValueError("Could not read the image file.")
+        raise ValueError("Could not read the image.")
 
     height, width = image.shape[:2]
     scale = settings.OCR_MAX_SIDE / max(height, width)

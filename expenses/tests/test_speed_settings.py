@@ -1,7 +1,5 @@
 """Reasoning effort on both OpenAI calls and downscaling before OCR. OpenAI is faked."""
 import os
-import shutil
-import tempfile
 from types import SimpleNamespace
 from unittest import mock
 
@@ -71,20 +69,10 @@ class ReasoningEffortTests(TestCase):
 
 
 class DownscaleBeforeOcrTests(SimpleTestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.folder = tempfile.mkdtemp()
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.folder, ignore_errors=True)
-        super().tearDownClass()
-
     def photo(self, width, height):
-        path = os.path.join(self.folder, f"{width}x{height}.png")
-        cv2.imwrite(path, np.full((height, width, 3), 255, dtype=np.uint8))
-        return path
+        """The bytes of a white PNG, as stored in Receipt.image_data."""
+        ok, encoded = cv2.imencode(".png", np.full((height, width, 3), 255, dtype=np.uint8))
+        return encoded.tobytes()
 
     def test_default_longest_side_is_1280(self):
         self.assertEqual(settings.OCR_MAX_SIDE, 1280)
@@ -99,3 +87,7 @@ class DownscaleBeforeOcrTests(SimpleTestCase):
 
     def test_small_photos_are_not_enlarged(self):
         self.assertEqual(preprocess(self.photo(600, 900)).shape, (900, 600))
+
+    def test_bytes_that_are_not_an_image_are_rejected(self):
+        with self.assertRaisesMessage(ValueError, "Could not read the image."):
+            preprocess(b"not an image")

@@ -1,10 +1,9 @@
 import datetime
-import tempfile
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from expenses.models import Expense, Item, Receipt
 from expenses.services import receipt_service
@@ -130,7 +129,6 @@ class ConfirmReceiptTests(TestCase):
         self.assertEqual(self.receipt.status, Receipt.Status.EXTRACTED)
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class ProcessReceiptTests(TestCase):
     """What the worker stores for a receipt. The AI steps are mocked: these tests cover how
     their results are cleaned and saved."""
@@ -157,7 +155,7 @@ class ProcessReceiptTests(TestCase):
             "items": [{"name": "Milk", "quantity": 2, "price": 1.25}, {"name": "", "price": 1}],
         })
 
-        ai.preprocess.assert_called_once_with(receipt.image.path)
+        ai.preprocess.assert_called_once_with(b"fake image bytes")  # read from the database
         ai.extract.assert_called_once_with("RAW TEXT", ["Bills", "Entertainment", "Food", "Health", "Other", "Shopping", "Transport"])
         self.assertEqual(receipt.user, self.user)
         self.assertEqual(receipt.status, Receipt.Status.EXTRACTED)

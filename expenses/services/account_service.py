@@ -52,7 +52,9 @@ def export_user_data(user) -> dict:
                 "uploaded_at": _iso(r.uploaded_at),
                 "raw_text": r.raw_text,
                 "extracted": r.extracted,
-                "image_file": r.image.name,
+                # Never the image bytes, only whether the image is still stored.
+                "image_name": r.image_name,
+                "image_stored": r.image_name != "",
             }
             for r in receipt_repository.list_for_user(user)
         ],
@@ -86,7 +88,7 @@ def export_user_data(user) -> dict:
 
 
 def delete_account(user, password) -> None:
-    """Delete the user and all their data, including receipt image files.
+    """Delete the user and all their data, including the receipt images.
 
     The current password is required, so someone using an unlocked, logged-in
     browser cannot delete the account.

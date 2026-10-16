@@ -1,7 +1,6 @@
 """3-decimal amounts, date sanity checks and bill-payment platform receipts. OpenAI and OCR are mocked."""
 import datetime
 import os
-import tempfile
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
@@ -140,7 +139,6 @@ class DateWarningRuleTests(SimpleTestCase):
             self.assertIsNone(review_checks.date_warning(datetime.date(2026, 10, 15)))
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class ExtractedDateTests(TestCase):
     def setUp(self):
         self.user = make_user()
@@ -269,7 +267,6 @@ class PaymentPlatformMatchingTests(SimpleTestCase):
                 self.assertIsNone(review_checks.find_biller(text))
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class PaymentPlatformReceiptTests(TestCase):
     def setUp(self):
         self.user = make_user()
