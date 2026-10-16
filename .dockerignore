@@ -1,0 +1,21 @@
+# Secrets and local environments
+.env
+.venv
+.git
+.gitignore
+.vscode
+.idea
+
+# Uploaded receipt images and personal data exports
+media
+masroofi-data-*.json
+
+# Evaluation data and results (large, personal or both)
+evaluation/sroie
+evaluation/receipts
+evaluation/results
+
+# Build and cache output
+**/__pycache__
+**/*.py[cod]
+staticfiles

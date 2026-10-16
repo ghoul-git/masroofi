@@ -20,9 +20,9 @@ class ConsentRequiredMiddleware:
 
     Exempt: admin, static files, the consent page itself, logging out, the Terms and
     Privacy pages (so they can be read first), /account/ (so a user who does not
-    accept can still download or delete their data), and the web app manifest,
+    accept can still download or delete their data), the web app manifest,
     service worker and offline page (which have no user data and must never be
-    swapped for the consent page). API requests get a JSON 403 instead of a redirect.
+    swapped for the consent page), and the /healthz health check. API requests get a JSON 403 instead of a redirect.
     """
 
     def __init__(self, get_response):
@@ -50,6 +50,7 @@ class ConsentRequiredMiddleware:
             reverse("manifest"),
             reverse("service-worker"),
             reverse("offline"),
+            reverse("healthz"),
         )
 
     def _needs_consent(self, request) -> bool:

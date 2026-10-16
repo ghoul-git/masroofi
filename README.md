@@ -62,6 +62,8 @@ The project combines three areas of AI: **computer vision** (OpenCV image prepro
 | Images | Pillow, NumPy | 12.3.0 / 2.4.6 | Image upload validation, image arrays |
 | Configuration | python-dotenv | 1.2.4 | Loading settings from `.env` |
 | Static files | WhiteNoise | 6.12.0 | Serving CSS and JavaScript in production, compressed and cached |
+| Production server | gunicorn | 26.2.0 | WSGI server in the Docker image |
+| Deployment | dj-database-url, Docker | 3.1.2 | `DATABASE_URL` support; one image for the web server and the worker |
 | Evaluation | psutil | 7.2.2 | Measuring process memory in the evaluation commands |
 | Frontend | Django templates, plain JavaScript (`fetch`), CSS | | Upload, review, expenses and chat pages |
 | Testing | Django test runner, `unittest.mock` | | Unit and API tests, with the OpenAI client and OCR mocked |
@@ -80,7 +82,10 @@ The app follows a layered design. Each layer only talks to the one below it:
 ```
 masroofi/
 ├── manage.py                       Django command-line entry point
-├── requirements.txt                Pinned Python dependencies
+├── requirements.txt                Pinned Python dependencies (torch and torchvision from the PyTorch CPU index)
+├── Dockerfile                      One image for the web server (default command) and the receipt worker
+├── .dockerignore                   Keeps secrets, receipts, evaluation data and caches out of the image
+├── docker-compose.yml              PostgreSQL 17, web and worker for running everything locally in Docker
 ├── .env.example                    Template for the environment variables (copy to .env)
 ├── evaluation/                     Evaluation data and results (see the Evaluation section)
 │   ├── chat_questions.csv          Questions for the chat agent with their expected answers
@@ -89,6 +94,7 @@ masroofi/
 │   └── results/                    Output of the evaluation commands; only summary.md is committed
 ├── config/                         Django project configuration
 │   ├── settings.py                 Settings, read from environment variables
+│   ├── database.py                 DATABASES from DATABASE_URL, or from the DB_* variables
 │   ├── urls.py                     Root URLs: admin and the expenses app (uploaded images are not public)
 │   └── asgi.py, wsgi.py            Server entry points
 └── expenses/                       The application
@@ -210,7 +216,7 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-This installs PyTorch for EasyOCR, so it is a large download and can take several minutes.
+This installs PyTorch for EasyOCR, so it is a large download and can take several minutes. `requirements.txt` takes torch and torchvision from the PyTorch CPU index; on Linux the default build would add several GB of NVIDIA GPU libraries that Masroofi does not use.
 
 ### Step 4: Create the PostgreSQL database and user
 
@@ -328,10 +334,10 @@ Before starting the app:
 2. Run the migrations: `python manage.py migrate`
 3. Collect the static files into `staticfiles/`: `python manage.py collectstatic --noinput`. Run it again after every deploy, or the pages cannot find their CSS and JavaScript.
 4. Check the settings: `python manage.py check --deploy`
-5. Serve `config.wsgi:application` with a production WSGI server, not `runserver`. One is not included in `requirements.txt`.
+5. Serve `config.wsgi:application` with a production WSGI server, not `runserver`: gunicorn is in `requirements.txt` (Linux and macOS only). The Docker image does all of this; see [Deployment](#deployment).
 6. Run `python manage.py process_receipts` as a second, always-running process (for example a systemd service or a hosting platform's worker process). It stops cleanly on Ctrl+C or SIGTERM.
 
-`media/` (receipt images) must be on a disk that persists between deploys.
+Receipt images (`MEDIA_ROOT`, `media/` by default) must be on a disk that persists between deploys.
 
 ## 6. Environment Variables
 
@@ -351,6 +357,8 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | `DB_PASSWORD` | Yes | Password of that PostgreSQL user. |
 | `DB_HOST` | No (defaults to `localhost`) | Host where PostgreSQL runs. |
 | `DB_PORT` | No (defaults to `5432`) | Port PostgreSQL listens on. |
+| `DATABASE_URL` | No | The whole database connection as one URL, `postgres://user:password@host:5432/name`, as most hosting providers give it. When set, it is used instead of the `DB_*` variables. Options can follow, such as `?sslmode=require`. |
+| `MEDIA_ROOT` | No (defaults to `media/` in the project) | Folder for uploaded receipt images. In production, a persistent disk shared by the web server and the worker. |
 | `OPENAI_API_KEY` | Yes, for receipts and chat | OpenAI API key used for receipt field extraction and the chat assistant. |
 | `OPENAI_MODEL` | Yes, for receipts and chat | Name of the OpenAI model used for both receipt field extraction and the chat assistant. |
 | `FREE_RECEIPTS_PER_MONTH` | No (defaults to `30`) | Receipts each user can process per calendar month (Jordan time). Staff users have no limit. |
@@ -364,6 +372,42 @@ All variables are read from `.env` in the project root. `.env` is listed in `.gi
 | `OCR_MAX_SIDE` | No (defaults to `1280`) | Receipt photos larger than this many pixels on their longest side are scaled down before OCR, which makes OCR faster. |
 | `OPENAI_INPUT_PRICE_PER_M` | No (defaults to `0.10`) | OpenAI price in USD per million input tokens. Only used by `evaluation_report` to estimate costs. |
 | `OPENAI_OUTPUT_PRICE_PER_M` | No (defaults to `0.50`) | OpenAI price in USD per million output tokens. Only used by `evaluation_report` to estimate costs. |
+
+## Deployment
+
+The `Dockerfile` builds one image (Python 3.11, CPU-only PyTorch, the EasyOCR Arabic and English models already downloaded, static files collected, running as a non-root user). The hosting provider builds it from the repository; Docker is not needed locally. Create two services from it:
+
+| Service | Command | What it does |
+|---|---|---|
+| web | the image's default command | Runs `migrate`, then gunicorn (`config.wsgi`, 2 workers, 60 s timeout) on `0.0.0.0:$PORT`. `PORT` is set by most hosts and defaults to 8000. |
+| worker | `python manage.py process_receipts` | Reads queued receipts (see Step 8). No public port. Stops cleanly on SIGTERM; a receipt it was reading goes back in the queue. |
+
+**Database.** A PostgreSQL database from the host. Give both services its `DATABASE_URL`. The web service runs the migrations each time it starts.
+
+**Environment variables.** Set on both services:
+
+- Required: `SECRET_KEY` (a new random value, never the development one), `DATABASE_URL` (or the `DB_*` variables), `OPENAI_API_KEY`, `OPENAI_MODEL`, `ALLOWED_HOSTS` (your domain) and `CSRF_TRUSTED_ORIGINS` (`https://` plus your domain).
+- `MEDIA_ROOT`: the mount path of the persistent disk, for example `/data/media`.
+- `DEBUG` stays unset or `False`.
+- The rest are optional (see [Environment Variables](#6-environment-variables)); give both services the same values.
+
+**Persistent disk for receipt images.** Uploaded images are written by the web service and read by the worker, so both must mount the same persistent disk at `MEDIA_ROOT`. Without one, images are lost on every deploy or restart, and the worker cannot see what the web service saved. If the host cannot share one disk between two services, run both processes on one server (for example with `docker-compose.yml`). A confirmed receipt's image is deleted, so the disk only holds receipts waiting for review.
+
+**Memory.** The server needs at least **4 GB of RAM**. The worker uses about 850 MB once the OCR model is loaded and peaks around 2.3 GB while reading a receipt (measured in the [Evaluation](#evaluation)), and the web service with 2 gunicorn workers needs a few hundred MB more. With less, the worker is killed for running out of memory and receipts are stuck in `processing` until it restarts.
+
+**Health check.** `GET /healthz` returns `200` with `{"status": "ok"}` when the app can reach the database, and `503` with `{"status": "unavailable"}` when it cannot. It needs no login, shows nothing else, and is exempt from the HTTPS redirect so the host can call it over plain HTTP. The request's host must still be in `ALLOWED_HOSTS`, as for any request.
+
+**The first admin user.** Open a shell on the web service (most hosts have a "Shell" or "Console" tab, or `docker compose exec web sh` locally) and run:
+
+```bash
+python manage.py createsuperuser
+```
+
+If the host has no interactive shell, set `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL` and `DJANGO_SUPERUSER_PASSWORD` on the web service, run `python manage.py createsuperuser --noinput` once as a one-off command, and then remove the three variables. As in Step 7, this user accepts the Terms and Privacy Policy on `/consent/` the first time they open the app.
+
+**Existing receipts.** After the first deploy with data copied from an older version, run `python manage.py redact_existing` once on the web service.
+
+**Running it all locally in Docker.** With Docker installed, `docker compose up --build` starts PostgreSQL 17 (data in the `postgres-data` volume), the web service on http://localhost:8000 and the worker, which share the `media` volume. It reads `.env`; `DB_NAME`, `DB_USER` and `DB_PASSWORD` also create the database. The worker starts once the web service has run the migrations and `/healthz` answers, so with `DEBUG=False`, `ALLOWED_HOSTS` must include `localhost`.
 
 ## API Endpoints
 

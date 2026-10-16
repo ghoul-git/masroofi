@@ -1,11 +1,16 @@
+# torch and torchvision come from the PyTorch CPU index (2.14.1+cpu satisfies ==2.14.1).
+# Without it, pip on Linux installs the CUDA build, which adds several GB of NVIDIA packages.
+--extra-index-url https://download.pytorch.org/whl/cpu
 annotated-types==0.8.0
 anyio==4.15.1
 asgiref==3.12.1
+dj-database-url==3.1.2
 Django==5.2.18
 djangorestframework==3.18.3
 easyocr==1.7.2
 filelock==4.1.0
 fsspec==2026.9.0
+gunicorn==26.2.0
 h11==0.16.0
 httpcore2==2.13.1
 httpx2==2.13.1

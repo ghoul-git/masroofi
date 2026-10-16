@@ -1,11 +1,12 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from expenses.views import account_views, chat_views, expense_views, legal_views, pwa_views, receipt_views
+from expenses.views import account_views, chat_views, expense_views, health_views, legal_views, pwa_views, receipt_views
 from expenses.views import auth_views as app_auth
 
 urlpatterns = [
     path("", app_auth.home, name="home"),
+    path("healthz", health_views.healthz, name="healthz"),
     path("register/", app_auth.register, name="register"),
     path("login/", auth_views.LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),

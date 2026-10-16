@@ -15,6 +15,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from config.database import database_from_env
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -58,6 +60,8 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", True)
+    # Hosting platforms call the health check over plain HTTP inside their network.
+    SECURE_REDIRECT_EXEMPT = [r"^healthz$"]
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 3600)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
@@ -115,16 +119,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ["DB_NAME"],
-        "USER": os.environ["DB_USER"],
-        "PASSWORD": os.environ["DB_PASSWORD"],
-        "HOST": os.getenv("DB_HOST", "localhost"),
-        "PORT": os.getenv("DB_PORT", "5432"),
-    }
-}
+# DATABASE_URL if set (most hosting providers give one), otherwise DB_NAME, DB_USER, ... (config/database.py).
+DATABASES = {"default": database_from_env(os.environ)}
 
 AUTH_USER_MODEL = "expenses.User"
 
@@ -179,7 +175,9 @@ STORAGES = {
 }
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# Uploaded receipt images. In production, point this at a persistent disk shared by the web
+# server and the worker, e.g. MEDIA_ROOT=/data/media.
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "").strip() or BASE_DIR / "media")
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "home"
